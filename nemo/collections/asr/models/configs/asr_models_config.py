@@ -38,6 +38,9 @@ class ASRDatasetConfig(nemo.core.classes.dataset.DatasetConfig):
     tarred_audio_filepaths: Optional[Any] = None
     tarred_shard_strategy: str = "scatter"
     shuffle_n: int = 0
+    
+    # Shelve dataset support
+    is_shelve: bool = False
 
     # Optional
     int_values: Optional[int] = None

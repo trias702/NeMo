@@ -40,6 +40,7 @@ __all__ = [
     'AudioToCharWithDursF0Dataset',
     'AudioToCharWithPriorDataset',
     'AudioToBPEDataset',
+    'ShelveAudioToCharDataset',
     'TarredAudioToCharDataset',
     'TarredAudioToBPEDataset',
 ]
@@ -400,6 +401,127 @@ class AudioToCharDataset(_AudioTextDataset):
             pad_id=pad_id,
             return_sample_id=return_sample_id,
         )
+
+
+class ShelveAudioToCharDataset(Dataset):
+    @property
+    def output_types(self) -> Optional[Dict[str, NeuralType]]:
+        """Returns definitions of module output ports.
+               """
+        return {
+            'audio_signal': NeuralType(('B', 'T'), AudioSignal()),
+            'a_sig_length': NeuralType(tuple('B'), LengthsType()),
+            'transcripts': NeuralType(('B', 'T'), LabelsType()),
+            'transcript_length': NeuralType(tuple('B'), LengthsType()),
+            'sample_id': NeuralType(tuple('B'), LengthsType(), optional=True),
+        }
+
+    def __init__(
+        self,
+        manifest_filepath: str,
+        labels: Union[str, List[str]],
+        sample_rate: int,
+        int_values: bool = False,
+        augmentor: 'nemo.collections.asr.parts.perturb.AudioAugmentor' = None,
+        max_duration: Optional[float] = None,
+        min_duration: Optional[float] = None,
+        max_utts: int = 0,
+        blank_index: int = -1,
+        unk_index: int = -1,
+        normalize: bool = True,
+        trim: bool = False,
+        bos_id: Optional[int] = None,
+        eos_id: Optional[int] = None,
+        pad_id: int = 0,
+        parser: Union[str, Callable] = 'en',
+        return_sample_id: bool = False,
+    ):
+        import shelve
+        
+        self.db = shelve.open(f'{manifest_filepath}/db', 'r')
+        self.keys = list(self.db.keys())
+        
+        self.eos_id = eos_id
+        self.bos_id = bos_id
+        self.pad_id = pad_id
+        
+        self.labels = labels
+
+        self.parser = parsers.make_parser(
+            labels=labels, name=parser, unk_id=unk_index, blank_id=blank_index, do_normalize=normalize
+        )
+        
+        self.featurizer = WaveformFeaturizer(sample_rate=sample_rate, int_values=int_values, augmentor=augmentor)
+        self.trim = trim
+        self.return_sample_id = return_sample_id
+        
+        self.kept_keys = []
+        self.line_inds = set()
+        
+        added = 0
+        skipped = 0
+        for i, kk in enumerate(self.keys):
+            meta = self.db[kk][-1]
+            duration = meta['frames'] / float(meta['sample_rate'])
+            if min_duration is not None and duration < min_duration:
+                skipped += 1
+                continue
+            if max_duration is not None and duration > max_duration:
+                skipped += 1
+                continue
+            self.kept_keys.append( kk )
+            self.line_inds.add(i)
+            added += 1
+            if max_utts > 0 and added == max_utts:
+                break
+            #self.labels_wrd.append(meta['label_wrd'])
+            #self.labels_ltr.append(meta['label_ltr'])
+        
+        #logger.info(f"loaded {len(self.kept_keys)}, skipped {skipped} samples")
+        
+        #self.sizes = np.array(self.sizes, dtype=np.int64)
+        
+    def __del__(self):
+        self.db.close()
+    
+    def process_text_by_sample(self, sample: List[int]) -> (List[int], int):
+        t, tl = sample, len(sample)
+
+        if self.bos_id is not None:
+            t = [self.bos_id] + t
+            tl += 1
+        if self.eos_id is not None:
+            t = t + [self.eos_id]
+            tl += 1
+
+        return t, tl
+    
+    def __getitem__(self, index):
+        import pickle, gzip
+        from nemo.collections.asr.parts.preprocessing.segment import AudioSegment
+        
+        payload = self.db[self.kept_keys[index]]
+        wav = pickle.loads(gzip.decompress(payload[0]))
+        manifest = payload[-1]
+
+        features = self.featurizer.process_segment(AudioSegment(wav, sample_rate=manifest['sample_rate'], target_sr=self.featurizer.sample_rate, trim=self.trim))
+        
+        f, fl = features, torch.tensor(features.shape[0]).long()
+
+        t, tl = self.process_text_by_sample(self.parser(manifest['label_wrd']))
+
+        if self.return_sample_id:
+            output = f, fl, torch.tensor(t).long(), torch.tensor(tl).long(), index
+        else:
+            output = f, fl, torch.tensor(t).long(), torch.tensor(tl).long()
+
+        return output
+
+    def __len__(self):
+        return len(self.kept_keys)
+
+    def _collate_fn(self, batch):
+        return _speech_collate_fn(batch, pad_id=self.pad_id)
 
 
 @deprecated(version="1.8", explanation="Please, use ``nemo.tts.collections.torch.data.TTSDataset`` instead.")
