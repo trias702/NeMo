@@ -462,7 +462,10 @@ class ShelveAudioToCharDataset(Dataset):
         skipped = 0
         for i, kk in enumerate(self.keys):
             meta = self.db[kk][-1]
-            duration = meta['frames'] / float(meta['sample_rate'])
+            if 'duration' in meta:
+                duration = float(meta['duration'])
+            else:
+                duration = meta['frames'] / float(meta['sample_rate'])
             if min_duration is not None and duration < min_duration:
                 skipped += 1
                 continue
