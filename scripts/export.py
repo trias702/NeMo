@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
+from omegaconf import OmegaConf, open_dict
 
 from nemo.core import ModelPT
 from nemo.core.classes import Exportable, typecheck

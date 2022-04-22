@@ -123,8 +123,8 @@ class ModelPT(LightningModule, Model):
         self._optimizer_param_groups = None
         self._optimizer = None
         self._scheduler = None
-        self.trainer = trainer  # reference required for self.*_rank
-        self._trainer = self.trainer  # alias for backward compatibility
+        self.set_trainer(trainer)
+
         self._save_restore_connector = SaveRestoreConnector()
 
         self._set_model_guid()
@@ -484,11 +484,11 @@ class ModelPT(LightningModule, Model):
                 optim_config['sched']['t_accumulate_grad_batches'] = self._trainer.accumulate_grad_batches
                 optim_config['sched']['t_limit_train_batches'] = self._trainer.limit_train_batches
                 if self._trainer.accelerator is None:
-                    optim_config['sched']['t_num_workers'] = self._trainer.num_gpus or 1
+                    optim_config['sched']['t_num_workers'] = self._trainer.num_devices or 1
                 elif self._trainer.accelerator == "ddp_cpu":
-                    optim_config['sched']['t_num_workers'] = self._trainer.num_processes * self._trainer.num_nodes
+                    optim_config['sched']['t_num_workers'] = self._trainer.num_devices * self._trainer.num_nodes
                 elif self._trainer.accelerator == "ddp":
-                    optim_config['sched']['t_num_workers'] = self._trainer.num_gpus * self._trainer.num_nodes
+                    optim_config['sched']['t_num_workers'] = self._trainer.num_devices * self._trainer.num_nodes
                 elif HAVE_NLPPLUGIN and isinstance(self._trainer.accelerator.training_type_plugin, NLPDDPPlugin):
                     app = AppState()
                     optim_config['sched']['t_num_workers'] = app.data_parallel_size
@@ -497,7 +497,7 @@ class ModelPT(LightningModule, Model):
                         f"The lightning trainer received accelerator: {self._trainer.accelerator}. We "
                         "recommend to use 'ddp' instead."
                     )
-                    optim_config['sched']['t_num_workers'] = self._trainer.num_gpus * self._trainer.num_nodes
+                    optim_config['sched']['t_num_workers'] = self._trainer.num_devices * self._trainer.num_nodes
             else:
                 optim_config['sched']['max_steps'] = self._trainer.max_steps
 
@@ -1030,7 +1030,7 @@ class ModelPT(LightningModule, Model):
                         trainer = self.trainer
                         if (
                             hasattr(trainer, 'resume_from_checkpoint')
-                            and trainer.checkpoint_connector.resume_checkpoint_path is not None
+                            and trainer._checkpoint_connector.resume_checkpoint_path is not None
                         ):
                             logging.info(
                                 "Model training is being resumed via Pytorch Lightning.\n"
@@ -1206,7 +1206,7 @@ class ModelPT(LightningModule, Model):
                     "  trainer.test(model)\n\n"""
 
         if trainer is not None:
-            if trainer.num_gpus > 1:
+            if trainer.num_devices > 1:
                 logging.warning(DDP_WARN)
                 return False
 
@@ -1223,7 +1223,7 @@ class ModelPT(LightningModule, Model):
         """
         self.trainer = trainer
         self._trainer = trainer
-        self.set_world_size(self._trainer)
+        self.set_world_size(trainer)
 
     def set_world_size(self, trainer: Trainer):
         """
@@ -1234,12 +1234,16 @@ class ModelPT(LightningModule, Model):
             trainer (Trainer): PyTorch Lightning Trainer object
         """
         # Update AppState with world information from trainer
-        if isinstance(trainer, Trainer):
-            app_state = AppState()
-            if self._trainer.num_gpus and self._trainer.num_nodes:
-                app_state.world_size = self._trainer.num_gpus * self._trainer.num_nodes
-        else:
-            logging.warning(f'World size can only be set by PyTorch Lightning Trainer.')
+        self.world_size = 1
+
+        if trainer is not None:
+            if isinstance(trainer, Trainer):
+                if trainer.num_devices and trainer.num_nodes:
+                    self.world_size = trainer.num_devices * trainer.num_nodes
+            else:
+                logging.warning(f'World size can only be set by PyTorch Lightning Trainer.')
+        app_state = AppState()
+        app_state.world_size = self.world_size
 
     def _update_dataset_config(self, dataset_name: str, config: Optional[Union[DictConfig, Dict]]):
         """
