@@ -33,7 +33,7 @@ from pytorch_lightning.callbacks.timer import Interval, Timer
 from pytorch_lightning.loggers import LoggerCollection as _LoggerCollection
 #from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.plugins.training_type.ddp import DDPPlugin
+from pytorch_lightning.strategies.ddp import DDPStrategy
 from pytorch_lightning.trainer.states import RunningStage
 from pytorch_lightning.utilities.distributed import rank_zero_info
 
@@ -372,7 +372,7 @@ def error_checks(trainer: 'pytorch_lightning.Trainer', cfg: Optional[Union[DictC
             "You are running multi-node training without SLURM handling the processes."
             " Please note that this is not tested in NeMo and could result in errors."
         )
-    if trainer.num_gpus > 1 and not isinstance(trainer.accelerator.training_type_plugin, DDPPlugin):
+    if trainer.num_devices > 1 and not isinstance(trainer.strategy, DDPStrategy):
         logging.error(
             "You are running multi-gpu without ddp.Please note that this is not tested in NeMo and could result in "
             "errors."
