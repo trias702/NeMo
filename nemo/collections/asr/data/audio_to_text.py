@@ -41,6 +41,7 @@ __all__ = [
     'AudioToCharWithPriorDataset',
     'AudioToBPEDataset',
     'ShelveAudioToCharDataset',
+    'ShelveAudioToBPEDataset',
     'TarredAudioToCharDataset',
     'TarredAudioToBPEDataset',
 ]
@@ -403,7 +404,7 @@ class AudioToCharDataset(_AudioTextDataset):
         )
 
 
-class ShelveAudioToCharDataset(Dataset):
+class _AudioTextShelveDataset(Dataset):
     @property
     def output_types(self) -> Optional[Dict[str, NeuralType]]:
         """Returns definitions of module output ports.
@@ -419,24 +420,22 @@ class ShelveAudioToCharDataset(Dataset):
     def __init__(
         self,
         manifest_filepath: str,
-        labels: Union[str, List[str]],
+        parser: Union[str, Callable],
         sample_rate: int,
         int_values: bool = False,
         augmentor: 'nemo.collections.asr.parts.perturb.AudioAugmentor' = None,
-        max_duration: Optional[float] = None,
-        min_duration: Optional[float] = None,
+        max_duration: Optional[int] = None,
+        min_duration: Optional[int] = None,
         max_utts: int = 0,
-        blank_index: int = -1,
-        unk_index: int = -1,
-        normalize: bool = True,
         trim: bool = False,
         bos_id: Optional[int] = None,
         eos_id: Optional[int] = None,
         pad_id: int = 0,
-        parser: Union[str, Callable] = 'en',
         return_sample_id: bool = False,
     ):
         import shelve
+        
+        self.parser = parser
         
         self.db = shelve.open(f'{manifest_filepath}/db', 'r')
         self.keys = list(self.db.keys())
@@ -444,13 +443,7 @@ class ShelveAudioToCharDataset(Dataset):
         self.eos_id = eos_id
         self.bos_id = bos_id
         self.pad_id = pad_id
-        
-        self.labels = labels
 
-        self.parser = parsers.make_parser(
-            labels=labels, name=parser, unk_id=unk_index, blank_id=blank_index, do_normalize=normalize
-        )
-        
         self.featurizer = WaveformFeaturizer(sample_rate=sample_rate, int_values=int_values, augmentor=augmentor)
         self.trim = trim
         self.return_sample_id = return_sample_id
@@ -525,6 +518,133 @@ class ShelveAudioToCharDataset(Dataset):
 
     def _collate_fn(self, batch):
         return _speech_collate_fn(batch, pad_id=self.pad_id)
+
+
+class ShelveAudioToCharDataset(_AudioTextShelveDataset):
+    @property
+    def output_types(self) -> Optional[Dict[str, NeuralType]]:
+        """Returns definitions of module output ports.
+               """
+        return {
+            'audio_signal': NeuralType(('B', 'T'), AudioSignal()),
+            'a_sig_length': NeuralType(tuple('B'), LengthsType()),
+            'transcripts': NeuralType(('B', 'T'), LabelsType()),
+            'transcript_length': NeuralType(tuple('B'), LengthsType()),
+            'sample_id': NeuralType(tuple('B'), LengthsType(), optional=True),
+        }
+
+    def __init__(
+        self,
+        manifest_filepath: str,
+        labels: Union[str, List[str]],
+        sample_rate: int,
+        int_values: bool = False,
+        augmentor: 'nemo.collections.asr.parts.perturb.AudioAugmentor' = None,
+        max_duration: Optional[float] = None,
+        min_duration: Optional[float] = None,
+        max_utts: int = 0,
+        blank_index: int = -1,
+        unk_index: int = -1,
+        normalize: bool = True,
+        trim: bool = False,
+        bos_id: Optional[int] = None,
+        eos_id: Optional[int] = None,
+        pad_id: int = 0,
+        parser: Union[str, Callable] = 'en',
+        return_sample_id: bool = False,
+    ):
+        self.labels = labels
+
+        parser = parsers.make_parser(
+            labels=labels, name=parser, unk_id=unk_index, blank_id=blank_index, do_normalize=normalize
+        )
+
+        super().__init__(
+            manifest_filepath=manifest_filepath,
+            parser=parser,
+            sample_rate=sample_rate,
+            int_values=int_values,
+            augmentor=augmentor,
+            max_duration=max_duration,
+            min_duration=min_duration,
+            max_utts=max_utts,
+            trim=trim,
+            bos_id=bos_id,
+            eos_id=eos_id,
+            pad_id=pad_id,
+            return_sample_id=return_sample_id,
+        )
+
+
+class ShelveAudioToBPEDataset(_AudioTextShelveDataset):
+    @property
+    def output_types(self) -> Optional[Dict[str, NeuralType]]:
+        """Returns definitions of module output ports.
+               """
+        return {
+            'audio_signal': NeuralType(('B', 'T'), AudioSignal()),
+            'a_sig_length': NeuralType(tuple('B'), LengthsType()),
+            'transcripts': NeuralType(('B', 'T'), LabelsType()),
+            'transcript_length': NeuralType(tuple('B'), LengthsType()),
+            'sample_id': NeuralType(tuple('B'), LengthsType(), optional=True),
+        }
+
+    def __init__(
+        self,
+        manifest_filepath: str,
+        tokenizer: 'nemo.collections.common.tokenizers.TokenizerSpec',
+        sample_rate: int,
+        int_values: bool = False,
+        augmentor: 'nemo.collections.asr.parts.perturb.AudioAugmentor' = None,
+        max_duration: Optional[int] = None,
+        min_duration: Optional[int] = None,
+        max_utts: int = 0,
+        trim: bool = False,
+        use_start_end_token: bool = True,
+        return_sample_id: bool = False,
+    ):
+        if use_start_end_token and hasattr(tokenizer, 'bos_token'):
+            bos_id = tokenizer.bos_id
+        else:
+            bos_id = None
+
+        if use_start_end_token and hasattr(tokenizer, 'eos_token'):
+            eos_id = tokenizer.eos_id
+        else:
+            eos_id = None
+
+        if hasattr(tokenizer, 'pad_token'):
+            pad_id = tokenizer.pad_id
+        else:
+            pad_id = 0
+
+        class TokenizerWrapper:
+            def __init__(self, tokenizer):
+                if isinstance(tokenizer, tokenizers.aggregate_tokenizer.AggregateTokenizer):
+                    self.is_aggregate = True
+                else:
+                    self.is_aggregate = False
+                self._tokenizer = tokenizer
+
+            def __call__(self, *args):
+                t = self._tokenizer.text_to_ids(*args)
+                return t
+
+        super().__init__(
+            manifest_filepath=manifest_filepath,
+            parser=TokenizerWrapper(tokenizer),
+            sample_rate=sample_rate,
+            int_values=int_values,
+            augmentor=augmentor,
+            max_duration=max_duration,
+            min_duration=min_duration,
+            max_utts=max_utts,
+            bos_id=bos_id,
+            eos_id=eos_id,
+            pad_id=pad_id,
+            trim=trim,
+            return_sample_id=return_sample_id,
+        )
 
 
 @deprecated(version="1.8", explanation="Please, use ``nemo.tts.collections.torch.data.TTSDataset`` instead.")

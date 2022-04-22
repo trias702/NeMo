@@ -102,7 +102,7 @@ def get_char_dataset(config: dict, augmentor: Optional['AudioAugmentor'] = None)
     return dataset
 
 
-def get_shelve_dataset(config: dict, augmentor: Optional['AudioAugmentor'] = None) -> audio_to_text.ShelveAudioToCharDataset:
+def get_shelve_dataset(config: dict, tokenizer: Optional['TokenizerSpec'] = None, augmentor: Optional['AudioAugmentor'] = None) -> Union[audio_to_text.ShelveAudioToCharDataset, audio_to_text.ShelveAudioToBPEDataset]:
     """
     Instantiates a Character Encoding based AudioToCharDataset.
 
@@ -113,26 +113,42 @@ def get_shelve_dataset(config: dict, augmentor: Optional['AudioAugmentor'] = Non
     Returns:
         An instance of AudioToCharDataset.
     """
-    if 'labels' not in config:
-        logging.warning(f"dataset does not have explicitly defined labels")
-
-    dataset = audio_to_text.ShelveAudioToCharDataset(
-        manifest_filepath=config['manifest_filepath'],
-        labels=config.get('labels', None),
-        sample_rate=config['sample_rate'],
-        int_values=config.get('int_values', False),
-        augmentor=augmentor,
-        max_duration=config.get('max_duration', None),
-        min_duration=config.get('min_duration', None),
-        max_utts=config.get('max_utts', 0),
-        blank_index=config.get('blank_index', -1),
-        unk_index=config.get('unk_index', -1),
-        normalize=config.get('normalize_transcripts', False),
-        trim=config.get('trim_silence', False),
-        parser=config.get('parser', 'en'),
-        return_sample_id=config.get('return_sample_id', False),
-    )
-    return dataset
+    if tokenizer is None:
+        if 'labels' not in config:
+            logging.warning(f"dataset does not have explicitly defined labels")
+    
+        dataset = audio_to_text.ShelveAudioToCharDataset(
+            manifest_filepath=config['manifest_filepath'],
+            labels=config.get('labels', None),
+            sample_rate=config['sample_rate'],
+            int_values=config.get('int_values', False),
+            augmentor=augmentor,
+            max_duration=config.get('max_duration', None),
+            min_duration=config.get('min_duration', None),
+            max_utts=config.get('max_utts', 0),
+            blank_index=config.get('blank_index', -1),
+            unk_index=config.get('unk_index', -1),
+            normalize=config.get('normalize_transcripts', False),
+            trim=config.get('trim_silence', False),
+            parser=config.get('parser', 'en'),
+            return_sample_id=config.get('return_sample_id', False),
+        )
+        return dataset
+    else:
+        dataset = audio_to_text.ShelveAudioToBPEDataset(
+            manifest_filepath=config['manifest_filepath'],
+            tokenizer=tokenizer,
+            sample_rate=config['sample_rate'],
+            int_values=config.get('int_values', False),
+            augmentor=augmentor,
+            max_duration=config.get('max_duration', None),
+            min_duration=config.get('min_duration', None),
+            max_utts=config.get('max_utts', 0),
+            trim=config.get('trim_silence', False),
+            use_start_end_token=config.get('use_start_end_token', True),
+            return_sample_id=config.get('return_sample_id', False),
+        )
+        return dataset
 
 
 def get_bpe_dataset(
