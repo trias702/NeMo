@@ -16,6 +16,9 @@ import contextlib
 import glob
 import json
 import os
+import shelve
+import math
+import numpy as np
 from dataclasses import dataclass, is_dataclass
 from typing import Optional
 
@@ -69,6 +72,22 @@ python transcribe_speech.py \
 
 
 @dataclass
+class FlashlightConfig:
+    # Required configs
+    ken_lm_path: Optional[str] = None
+    lexicon_path: Optional[str] = None
+    nbest: int = 1
+    beam_size: int = 32
+    beam_size_token: int = 100
+    beam_threshold: float = 25.0
+    lm_weight: float = 2.0
+    word_score: float = -1.0
+    unk_weight: float = -math.inf
+    sil_weight: float = 0.0
+    unit_lm: bool = False
+
+
+@dataclass
 class TranscriptionConfig:
     # Required configs
     model_path: Optional[str] = None  # Path to a .nemo file
@@ -80,6 +99,7 @@ class TranscriptionConfig:
     output_filename: Optional[str] = None
     batch_size: int = 32
     num_workers: int = 0
+    is_shelve: bool = False
 
     # Set `cuda` to int to define CUDA device. If 'None', will look for CUDA
     # device anyway, and do inference on CPU only if CUDA device is not found.
@@ -93,6 +113,9 @@ class TranscriptionConfig:
 
     # Decoding strategy for RNNT models
     rnnt_decoding: RNNTDecodingConfig = RNNTDecodingConfig(fused_batch_size=-1)
+    
+    # If you want to decode with flashlight
+    flashlight: Optional[FlashlightConfig] = FlashlightConfig()
 
 
 @hydra_runner(config_name="TranscriptionConfig", schema=TranscriptionConfig)
@@ -149,26 +172,34 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
         asr_model.change_decoding_strategy(cfg.rnnt_decoding)
 
     # get audio filenames
-    if cfg.audio_dir is not None:
-        filepaths = list(glob.glob(os.path.join(cfg.audio_dir, f"*.{cfg.audio_type}")))
+    if not cfg.is_shelve:
+        if cfg.audio_dir is not None:
+            filepaths = list(glob.glob(os.path.join(cfg.audio_dir, f"*.{cfg.audio_type}")))
+        else:
+            # get filenames from manifest
+            filepaths = []
+            if os.stat(cfg.dataset_manifest).st_size == 0:
+                logging.error(f"The input dataset_manifest {cfg.dataset_manifest} is empty. Exiting!")
+                return None
+    
+            with open(cfg.dataset_manifest, 'r') as f:
+                has_two_fields = []
+                for line in f:
+                    item = json.loads(line)
+                    if "offset" in item and "duration" in item:
+                        has_two_fields.append(True)
+                    else:
+                        has_two_fields.append(False)
+                    filepaths.append(item['audio_filepath'])
+            partial_audio = all(has_two_fields)
     else:
-        # get filenames from manifest
-        filepaths = []
-        if os.stat(cfg.dataset_manifest).st_size == 0:
-            logging.error(f"The input dataset_manifest {cfg.dataset_manifest} is empty. Exiting!")
+        if not (os.path.exists(cfg.dataset_manifest) and os.path.isfile(os.path.join(cfg.dataset_manifest, "db.dat"))):
+            logging.error(f"The input shelve db directory {cfg.dataset_manifest} is empty or does not exist. Exiting!")
             return None
-
-        with open(cfg.dataset_manifest, 'r') as f:
-            has_two_fields = []
-            for line in f:
-                item = json.loads(line)
-                if "offset" in item and "duration" in item:
-                    has_two_fields.append(True)
-                else:
-                    has_two_fields.append(False)
-                filepaths.append(item['audio_filepath'])
-        partial_audio = all(has_two_fields)
-
+        partial_audio = False
+        with shelve.open(f'{os.path.join(cfg.dataset_manifest, "db")}', 'r') as db:
+            filepaths = list(db.keys())
+    
     logging.info(f"\nTranscribing {len(filepaths)} files...\n")
 
     # setup AMP (optional)
@@ -187,7 +218,10 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
         if cfg.audio_dir is not None:
             cfg.output_filename = os.path.dirname(os.path.join(cfg.audio_dir, '.')) + '.json'
         else:
-            cfg.output_filename = cfg.dataset_manifest.replace('.json', f'_{model_name}.json')
+            if cfg.is_shelve:
+                cfg.output_filename = cfg.dataset_manifest.rstrip(os.path.sep) + '_transcribed.json'
+            else:
+                cfg.output_filename = cfg.dataset_manifest.replace('.json', f'_{model_name}.json')
 
     # if transcripts should not be overwritten, and already exists, skip re-transcription step and return
     if not cfg.overwrite_transcripts and os.path.exists(cfg.output_filename):
@@ -214,12 +248,47 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
                         "RNNT models do not support transcribe partial audio for now. Transcribing full audio."
                     )
                     transcriptions = asr_model.transcribe(
-                        paths2audio_files=filepaths, batch_size=cfg.batch_size, num_workers=cfg.num_workers,
+                        paths2audio_files=filepaths, batch_size=cfg.batch_size, num_workers=cfg.num_workers, logprobs=cfg.flashlight.ken_lm_path is not None,
                     )
             else:
-                transcriptions = asr_model.transcribe(
-                    paths2audio_files=filepaths, batch_size=cfg.batch_size, num_workers=cfg.num_workers,
-                )
+                if cfg.is_shelve:
+                    transcriptions = asr_model.transcribe(
+                        manifest_file=cfg.dataset_manifest, batch_size=cfg.batch_size, num_workers=cfg.num_workers, logprobs=cfg.flashlight.ken_lm_path is not None,
+                    )
+                else:
+                    transcriptions = asr_model.transcribe(
+                        paths2audio_files=filepaths, batch_size=cfg.batch_size, num_workers=cfg.num_workers, logprobs=cfg.flashlight.ken_lm_path is not None,
+                    )
+    
+    # flashlight decoding
+    # runs slow due to single-process, single-threading, but cannot use multiprocessing because can't pickle the flashlight-pybind objects
+    if cfg.flashlight.ken_lm_path is not None:
+        logging.info("Setting up flashlight kenlm decoder")
+        #import multiprocessing
+        #from functools import partial
+        from nemo.collections.asr.modules import FlashLightKenLMBeamSearchDecoder
+        from tqdm import tqdm
+        kenlm_dec = FlashLightKenLMBeamSearchDecoder(asr_model.cpu(),
+            lm_path=cfg.flashlight.ken_lm_path,
+            lexicon_path=cfg.flashlight.lexicon_path,
+            nbest=cfg.flashlight.nbest,
+            beam_size=cfg.flashlight.beam_size,
+            beam_size_token=cfg.flashlight.beam_size_token,
+            beam_threshold=cfg.flashlight.beam_threshold,
+            lm_weight=cfg.flashlight.lm_weight,
+            word_score=cfg.flashlight.word_score,
+            unk_weight=cfg.flashlight.unk_weight,
+            sil_weight=cfg.flashlight.sil_weight,
+            unit_lm=cfg.flashlight.unit_lm,
+        )
+        
+        #comp = np.stack(transcriptions, axis=0)
+        #decoded = kenlm_dec.forward(log_probs=comp)
+        decoded = [kenlm_dec.forward(log_probs=lg)[0] for lg in tqdm(transcriptions, desc="Flashlight decoding", total=len(transcriptions))]
+        transcriptions = [' '.join(d[0]['words']) for d in decoded]
+        #f_partial = partial(imap_func, kenlm_dec=kenlm_dec)
+        #with multiprocessing.Pool(processes=12) as pool:
+        #    transcriptions = [' '.join(d[0]['words']) for d in tqdm(pool.imap(func=f_partial, iterable=transcriptions), total=len(transcriptions))]
 
     logging.info(f"Finished transcribing {len(filepaths)} files !")
 
@@ -235,11 +304,21 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
                 item = {'audio_filepath': filepaths[idx], 'pred_text': text}
                 f.write(json.dumps(item) + "\n")
         else:
-            with open(cfg.dataset_manifest, 'r') as fr:
-                for idx, line in enumerate(fr):
-                    item = json.loads(line)
-                    item['pred_text'] = transcriptions[idx]
-                    f.write(json.dumps(item) + "\n")
+            if cfg.is_shelve:
+                with shelve.open(f'{os.path.join(cfg.dataset_manifest, "db")}', 'r') as db:
+                    for transcript, key in zip(transcriptions, list(db.keys())):
+                        meta = db[key][-1]
+                        meta['pred_text'] = transcript
+                        del meta['label_wrd']
+                        del meta['label_ltr']
+                        del meta['sampling_rate']
+                        f.write(json.dumps(meta) + "\n")
+            else:
+                with open(cfg.dataset_manifest, 'r') as fr:
+                    for transcript, line in zip(transcriptions, fr):
+                        item = json.loads(line)
+                        item['pred_text'] = transcript
+                        f.write(json.dumps(item) + "\n")
 
     logging.info("Finished writing predictions !")
     return cfg

@@ -17,6 +17,7 @@ import os
 import tempfile
 from math import ceil
 from typing import Dict, List, Optional, Union
+from contextlib import ExitStack
 
 import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
@@ -207,7 +208,8 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
     @torch.no_grad()
     def transcribe(
         self,
-        paths2audio_files: List[str],
+        paths2audio_files: Optional[List[str]] = None,
+        manifest_file: Optional[str] = None,
         batch_size: int = 4,
         logprobs: bool = False,
         return_hypotheses: bool = False,
@@ -230,8 +232,11 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
         Returns:
             A list of transcriptions (or raw log probabilities if logprobs is True) in the same order as paths2audio_files
         """
-        if paths2audio_files is None or len(paths2audio_files) == 0:
+        if (paths2audio_files is None or len(paths2audio_files) == 0) and (manifest_file is None):
             return {}
+        
+        if (paths2audio_files is not None and len(paths2audio_files) > 0) and (manifest_file is not None):
+            raise ValueError("Pass only one of `paths2audio_files` or `manifest_file`, not both.")
 
         if return_hypotheses and logprobs:
             raise ValueError(
@@ -261,18 +266,26 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
             logging_level = logging.get_verbosity()
             logging.set_verbosity(logging.WARNING)
             # Work in tmp directory - will store manifest file there
-            with tempfile.TemporaryDirectory() as tmpdir:
-                with open(os.path.join(tmpdir, 'manifest.json'), 'w', encoding='utf-8') as fp:
-                    for audio_file in paths2audio_files:
-                        entry = {'audio_filepath': audio_file, 'duration': 100000, 'text': ''}
-                        fp.write(json.dumps(entry) + '\n')
-
-                config = {
-                    'paths2audio_files': paths2audio_files,
-                    'batch_size': batch_size,
-                    'temp_dir': tmpdir,
-                    'num_workers': num_workers,
-                }
+            with ExitStack() if (manifest_file is not None) else tempfile.TemporaryDirectory() as tmpdir:
+                if manifest_file is None:
+                    with open(os.path.join(tmpdir, 'manifest.json'), 'w', encoding='utf-8') as fp:
+                        for audio_file in paths2audio_files:
+                            entry = {'audio_filepath': audio_file, 'duration': 100000, 'text': ''}
+                            fp.write(json.dumps(entry) + '\n')
+    
+                    config = {
+                        'paths2audio_files': paths2audio_files,
+                        'batch_size': batch_size,
+                        'temp_dir': tmpdir,
+                        'num_workers': num_workers,
+                    }
+                else:
+                    config = {
+                        'manifest_filepath': manifest_file,
+                        'batch_size': batch_size,
+                        'num_workers': num_workers,
+                        'is_shelve': os.path.isdir(manifest_file),
+                    }
 
                 temporary_datalayer = self._setup_transcribe_dataloader(config)
                 for test_batch in tqdm(temporary_datalayer, desc="Transcribing"):
@@ -710,6 +723,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
             'batch_size': batch_size,
             'trim_silence': False,
             'shuffle': False,
+            'is_shelve': config.get('is_shelve', False),
             'num_workers': config.get('num_workers', min(batch_size, os.cpu_count() - 1)),
             'pin_memory': True,
         }
