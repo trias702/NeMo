@@ -166,12 +166,12 @@ def main(cfg: ParallelTranscriptionConfig):
     pred_text_list = []
     text_list = []
     if is_global_rank_zero():
-        output_file = os.path.join(cfg.output_path, f"predictions_all.json")
+        output_file = os.path.join(cfg.output_path, "predictions_all.json")
         logging.info(f"Prediction files are being aggregated in {output_file}.")
-        with open(output_file, 'w') as outf:
+        with open(output_file, 'w', encoding='utf-8') as outf:
             for rank in range(trainer.world_size):
                 input_file = os.path.join(cfg.output_path, f"predictions_{rank}.json")
-                with open(input_file, 'r') as inpf:
+                with open(input_file, 'r', encoding='utf-8') as inpf:
                     lines = inpf.readlines()
                     for line in lines:
                         item = json.loads(line)

@@ -492,6 +492,19 @@ class _AudioTextShelveDataset(Dataset):
 
         return t, tl
     
+    def get_manifest_sample(self, sample_id):
+        manifest = self.db[self.kept_keys[sample_id]][-1]
+        
+        return collections.AudioText.OUTPUT_TYPE(sample_id,
+                                                 manifest['audio_filepath'],
+                                                 manifest['duration'],
+                                                 self.parser(manifest['label_wrd']),
+                                                 manifest.get('offset', None),
+                                                 manifest['text'],
+                                                 manifest.get('speaker_id', None),
+                                                 manifest['sample_rate'],
+                                                 manifest['language'])
+    
     def __getitem__(self, index):
         import pickle, gzip
         from nemo.collections.asr.parts.preprocessing.segment import AudioSegment
@@ -617,7 +630,7 @@ class ShelveAudioToBPEDataset(_AudioTextShelveDataset):
             pad_id = tokenizer.pad_id
         else:
             pad_id = 0
-
+        
         class TokenizerWrapper:
             def __init__(self, tokenizer):
                 if isinstance(tokenizer, tokenizers.aggregate_tokenizer.AggregateTokenizer):
@@ -625,11 +638,11 @@ class ShelveAudioToBPEDataset(_AudioTextShelveDataset):
                 else:
                     self.is_aggregate = False
                 self._tokenizer = tokenizer
-
+    
             def __call__(self, *args):
                 t = self._tokenizer.text_to_ids(*args)
                 return t
-
+        
         super().__init__(
             manifest_filepath=manifest_filepath,
             parser=TokenizerWrapper(tokenizer),
