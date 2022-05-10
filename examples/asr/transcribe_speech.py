@@ -77,11 +77,11 @@ class FlashlightConfig:
     ken_lm_path: Optional[str] = None
     lexicon_path: Optional[str] = None
     nbest: int = 1
-    beam_size: int = 32
-    beam_size_token: int = 100
-    beam_threshold: float = 25.0
-    lm_weight: float = 2.0
-    word_score: float = -1.0
+    beam_size: int = 16
+    beam_size_token: int = 16
+    beam_threshold: float = 20.0
+    lm_weight: float = 0.2
+    word_score: float = 0.2
     unk_weight: float = -math.inf
     sil_weight: float = 0.0
     unit_lm: bool = False

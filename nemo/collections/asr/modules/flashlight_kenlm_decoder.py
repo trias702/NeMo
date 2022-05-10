@@ -87,7 +87,7 @@ class FlashLightKenLMBeamSearchDecoder(NeuralModule):
         lexicon_path=None,
         nbest=1,
         beam_size=32,
-        beam_size_token=100,
+        beam_size_token=32,
         beam_threshold=25.0,
         lm_weight=2.0,
         word_score=-1.0,
