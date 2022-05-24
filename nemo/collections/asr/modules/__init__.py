@@ -21,12 +21,13 @@ from nemo.collections.asr.modules.audio_preprocessing import (
 )
 from nemo.collections.asr.modules.beam_search_decoder import BeamSearchDecoderWithLM
 from nemo.collections.asr.modules.flashlight_kenlm_decoder import FlashLightKenLMBeamSearchDecoder
-from nemo.collections.asr.modules.conformer_encoder import ConformerEncoder
+from nemo.collections.asr.modules.conformer_encoder import ConformerEncoder, ConformerEncoderAdapter
 from nemo.collections.asr.modules.conv_asr import (
     ConvASRDecoder,
     ConvASRDecoderClassification,
     ConvASRDecoderReconstruction,
     ConvASREncoder,
+    ConvASREncoderAdapter,
     ECAPAEncoder,
     ParallelConvASREncoder,
     SpeakerDecoder,

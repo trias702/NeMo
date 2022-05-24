@@ -14,16 +14,12 @@
 import io
 import math
 import os
-from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Union
 
 import braceexpand
-import librosa
 import numpy as np
 import torch
 import webdataset as wd
-from scipy.stats import betabinom
-from torch.nn import functional as F
 from torch.utils.data import ChainDataset
 
 from nemo.collections.asr.parts.preprocessing.features import WaveformFeaturizer
@@ -31,14 +27,10 @@ from nemo.collections.common import tokenizers
 from nemo.collections.common.parts.preprocessing import collections, parsers
 from nemo.core.classes import Dataset, IterableDataset
 from nemo.core.neural_types import *
-from nemo.core.neural_types.elements import ProbsType
 from nemo.utils import logging
-from nemo.utils.decorators import deprecated
 
 __all__ = [
     'AudioToCharDataset',
-    'AudioToCharWithDursF0Dataset',
-    'AudioToCharWithPriorDataset',
     'AudioToBPEDataset',
     'ShelveAudioToCharDataset',
     'ShelveAudioToBPEDataset',
@@ -1375,7 +1367,7 @@ class _TarredAudioToTextDataset(IterableDataset):
             logging.info("WebDataset will not shuffle files within the tar files.")
 
         self._dataset = (
-            self._dataset.rename(audio='wav;ogg', key='__key__')
+            self._dataset.rename(audio='wav;ogg;flac', key='__key__')
             .to_tuple('audio', 'key')
             .pipe(self._filter)
             .map(f=self._build_sample)

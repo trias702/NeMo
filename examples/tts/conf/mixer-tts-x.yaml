@@ -29,7 +29,7 @@ window: hann
 
 lm_model: albert
 
-whitelist_path: "nemo_text_processing/text_normalization/en/data/whitelist_lj_speech.tsv"
+whitelist_path: "nemo_text_processing/text_normalization/en/data/whitelist/lj_speech.tsv"
 
 model:
   bin_loss_start_ratio: 0.2
@@ -208,9 +208,9 @@ model:
     padding: 1
 
   optim:
-    name: lamb
+    name: adamw
     lr: 1e-1
-    betas: [0.9, 0.98]
+    betas: [0.9, 0.999]
     weight_decay: 1e-6
 
     sched:
