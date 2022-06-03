@@ -488,16 +488,16 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
                 " with ``processed_signal`` and ``processed_signal_len`` arguments."
             )
 
-        if not has_processed_signal:
-            processed_signal, processed_signal_length = self.preprocessor(
-                input_signal=input_signal, length=input_signal_length,
-            )
-
-        if self.spec_augmentation is not None and self.training:
-            processed_signal = self.spec_augmentation(input_spec=processed_signal, length=processed_signal_length)
-        
         ft = self.freeze_finetune_updates <= self.num_updates
         with torch.no_grad() if not ft else contextlib.ExitStack():
+            if not has_processed_signal:
+                processed_signal, processed_signal_length = self.preprocessor(
+                    input_signal=input_signal, length=input_signal_length,
+                )
+
+            if self.spec_augmentation is not None and self.training:
+                processed_signal = self.spec_augmentation(input_spec=processed_signal, length=processed_signal_length)
+
             encoded, encoded_len = self.encoder(audio_signal=processed_signal, length=processed_signal_length)
         log_probs = self.decoder(encoder_output=encoded)
         greedy_predictions = log_probs.argmax(dim=-1, keepdim=False)
