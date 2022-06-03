@@ -25,6 +25,7 @@ from nemo.core.optim.lr_scheduler import (
     WarmupAnnealing,
     WarmupHoldPolicy,
     WarmupPolicy,
+    TriStageAnnealing,
     prepare_lr_scheduler,
 )
 from nemo.core.optim.novograd import Novograd

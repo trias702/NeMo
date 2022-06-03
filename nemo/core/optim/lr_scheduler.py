@@ -215,6 +215,112 @@ class WarmupHoldPolicy(WarmupPolicy):
         return self._get_lr(step)
 
 
+class TriStageAnnealing(_LRScheduler):
+    def __init__(
+        self,
+        optimizer,
+        *,
+        warmup_steps=None,
+        hold_steps=None,
+        decay_steps=None,
+        phase_ratio=None,
+        max_steps=None,
+        init_lr_scale=0.01,
+        final_lr_scale=0.01,
+        last_epoch=-1,
+    ):
+        #assert not (hold_steps is not None and hold_ratio is not None), "Either use particular number of step or ratio"
+        #assert hold_ratio is None or max_steps is not None, "If there is a ratio, there should be a total steps"
+        
+        base_lr = [group['lr'] for group in optimizer.param_groups]
+        
+        # calculate LR at each point
+        self.peak_lr = base_lr[0]
+        self.init_lr = init_lr_scale * base_lr[0]
+        self.final_lr = final_lr_scale * base_lr[0]
+        
+        self.max_steps = max_steps
+        self.phase_ratio = phase_ratio
+        if self.phase_ratio is not None:
+            assert max_steps > 0
+            assert sum(phase_ratio) == 1, "phase ratios must add up to 1"
+            self.warmup_steps = int(max_steps * phase_ratio[0])
+            self.hold_steps = int(max_steps * phase_ratio[1])
+            self.decay_steps = int(max_steps * phase_ratio[2])
+        else:
+            if warmup_steps is not None:
+                self.warmup_steps = warmup_steps
+            else:
+                self.warmup_steps = 0
+            if hold_steps is not None:
+                self.hold_steps = hold_steps
+            else:
+                self.hold_steps = 0
+            if decay_steps is not None:
+                self.decay_steps = decay_steps
+            else:
+                self.decay_steps = 0
+        
+        assert (
+            self.warmup_steps + self.hold_steps + self.decay_steps > 0
+        ), "please specify steps or phase_ratio"
+
+        self.warmup_rate = (
+            (self.peak_lr - self.init_lr) / self.warmup_steps
+            if self.warmup_steps != 0
+            else 0
+        )
+        self.decay_factor = -math.log(final_lr_scale) / self.decay_steps
+
+        super().__init__(optimizer, last_epoch)        
+    
+    def _decide_stage(self, update_step):
+        """
+        return stage, and the corresponding steps within the current stage
+        """
+        if update_step < self.warmup_steps:
+            # warmup state
+            return 0, update_step
+
+        offset = self.warmup_steps
+
+        if update_step < offset + self.hold_steps:
+            # hold stage
+            return 1, update_step - offset
+
+        offset += self.hold_steps
+
+        if update_step <= offset + self.decay_steps:
+            # decay stage
+            return 2, update_step - offset
+
+        offset += self.decay_steps
+
+        # still here ? constant lr stage
+        return 3, update_step - offset
+    
+    def get_lr(self):
+        if not self._get_lr_called_within_step:
+            warnings.warn(
+                "To get the last learning rate computed by the scheduler, " "please use `get_last_lr()`.", UserWarning
+            )
+
+        step = self.last_epoch
+        
+        stage, steps_in_stage = self._decide_stage(step)
+        if stage == 0:
+            return [self.init_lr + self.warmup_rate * steps_in_stage for _ in self.base_lrs]
+        elif stage == 1:
+            return [self.peak_lr for _ in self.base_lrs]
+        elif stage == 2:
+            return [self.peak_lr * math.exp(-self.decay_factor * steps_in_stage) for _ in self.base_lrs]
+        elif stage == 3:
+            return [self.final_lr for _ in self.base_lrs]
+        else:
+            raise ValueError("Undefined stage")
+            #return self.base_lrs
+
+
 class WarmupAnnealHoldPolicy(_LRScheduler):
     """Adds warmup kwargs and warmup logic to lr policy.
     All arguments should be passed as kwargs for clarity,
@@ -885,6 +991,7 @@ AVAILABLE_SCHEDULERS = {
     'CosineAnnealing': CosineAnnealing,
     'NoamAnnealing': NoamAnnealing,
     'WarmupAnnealing': WarmupAnnealing,
+    'TriStageAnnealing': TriStageAnnealing,
     'InverseSquareRootAnnealing': InverseSquareRootAnnealing,
     'T5InverseSquareRootAnnealing': T5InverseSquareRootAnnealing,
     'SquareRootAnnealing': SquareRootAnnealing,

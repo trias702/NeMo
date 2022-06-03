@@ -34,9 +34,10 @@ model:
   preprocessor:
     _target_: nemo.collections.asr.modules.wav2vec_modules.ConvFeatureEncoder
     extractor_mode: layer_norm # Mode for feature extractor. [group_norm, layer_norm]
-    conv_bias: False # Include bias in convolution feature extractor model
+    conv_bias: True # Include bias in convolution feature extractor model
     feature_grad_mult: 1.0 # Multiply extracted feature gradients
     normalize_audio: true
+    dropout: 0.0
     embedding_dim: *emb_dim # Final dimensions of output
     conv_layers:
       - emb_dim: 512
@@ -71,20 +72,24 @@ model:
 
   encoder:
     _target_: nemo.collections.asr.modules.wav2vec_modules.Wav2VecTransformerEncoder
-    layer_drop: 0.2
     pos_embed: # Config for convolutional model that generates positional embeddings required for attention layer
       embedding_dim: *emb_dim
+      conv_depth: 1
       conv_pos: 128 # Number of filters for convolutional positional embeddings
       conv_pos_groups: 16 # Number of groups for convolutional positional embeddings
     transformer: # Config for nemo.collections.nlp.modules.common.transformer.TransformerEncoder
+      layer_type: transformer
       num_layers: 24 # Number of encoder layers in transformer model
       hidden_size: *emb_dim # Encoder embedding dim
-      inner_size: 4096 # Encoder embedding dim for feed forward
+      ffn_embed_dim: 4096 # Encoder embedding dim for feed forward
       num_attention_heads: 16 # Number of encoder attention heads
-      attn_score_dropout: .1 #probability of dropout applied to attention scores
-      attn_layer_dropout: .1 #probability of dropout applied to the output of the attention layers, but before layer normalization
-      ffn_dropout: .1 # probability of dropout applied to FFN output
-      hidden_act: gelu # Activation for transformer
+      attention_dropout: .1 #probability of dropout applied to attention scores
+      activation_dropout: .1 #probability of dropout applied to the output of the attention layers, but before layer normalization
+      dropout: .1 # probability of dropout applied to FFN output
+      activation_fn: gelu # Activation for transformer
+      required_seq_len_multiple: 1
+      layer_norm_first: False
+      encoder_layerdrop: 0.1
 
   decoder:
     _target_: nemo.collections.asr.modules.ConvASRDecoderReconstruction

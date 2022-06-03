@@ -15,6 +15,7 @@ import copy
 import json
 import os
 import tempfile
+import contextlib
 from math import ceil
 from typing import Dict, List, Optional, Union
 from contextlib import ExitStack
@@ -45,6 +46,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
         # Get global rank and total number of GPU workers for IterableDataset partitioning, if applicable
         # Global_rank and local_rank is set by LightningModule in Lightning 1.2.0
         self.world_size = 1
+        self.num_updates = 0
         if trainer is not None:
             self.world_size = trainer.world_size
 
@@ -80,6 +82,11 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
             self.spec_augmentation = EncDecCTCModel.from_config_dict(self._cfg.spec_augment)
         else:
             self.spec_augmentation = None
+        
+        if hasattr(self._cfg, 'freeze_finetune_updates') and self._cfg.freeze_finetune_updates is not None:
+            self.freeze_finetune_updates = self._cfg.freeze_finetune_updates
+        else:
+            self.freeze_finetune_updates = 0
 
         # Setup metric objects
         self._wer = WER(
@@ -488,8 +495,10 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
 
         if self.spec_augmentation is not None and self.training:
             processed_signal = self.spec_augmentation(input_spec=processed_signal, length=processed_signal_length)
-
-        encoded, encoded_len = self.encoder(audio_signal=processed_signal, length=processed_signal_length)
+        
+        ft = self.freeze_finetune_updates <= self.num_updates
+        with torch.no_grad() if not ft else contextlib.ExitStack():
+            encoded, encoded_len = self.encoder(audio_signal=processed_signal, length=processed_signal_length)
         log_probs = self.decoder(encoder_output=encoded)
         greedy_predictions = log_probs.argmax(dim=-1, keepdim=False)
 
@@ -498,6 +507,8 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
     # PTL-specific methods
     def training_step(self, batch, batch_nb):
         signal, signal_len, transcript, transcript_len = batch
+        self.num_updates += 1
+        
         if isinstance(batch, DALIOutputs) and batch.has_processed_signal:
             log_probs, encoded_len, predictions = self.forward(
                 processed_signal=signal, processed_signal_length=signal_len
