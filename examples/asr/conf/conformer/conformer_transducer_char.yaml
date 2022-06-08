@@ -198,7 +198,6 @@ model:
       d_model: ${model.encoder.d_model}
       # scheduler config override
       warmup_steps: 10000
-      warmup_ratio: null
       min_lr: 1e-6
 
 trainer:
