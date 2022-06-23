@@ -20,6 +20,7 @@ import shelve
 import math
 import numpy as np
 from dataclasses import dataclass, is_dataclass
+from pathlib import Path
 from typing import Optional
 
 import pytorch_lightning as pl
@@ -27,6 +28,7 @@ import torch
 from omegaconf import OmegaConf
 
 from nemo.collections.asr.metrics.rnnt_wer import RNNTDecodingConfig
+from nemo.collections.asr.metrics.wer import CTCDecodingConfig
 from nemo.collections.asr.models import ASRModel
 from nemo.collections.asr.models.ctc_models import EncDecCTCModel
 from nemo.collections.asr.parts.utils.transcribe_utils import transcribe_partial_audio
@@ -111,6 +113,9 @@ class TranscriptionConfig:
     # Recompute model transcription, even if the output folder exists with scores.
     overwrite_transcripts: bool = True
 
+    # Decoding strategy for CTC models
+    ctc_decoding: CTCDecodingConfig = CTCDecodingConfig()
+
     # Decoding strategy for RNNT models
     rnnt_decoding: RNNTDecodingConfig = RNNTDecodingConfig(fused_batch_size=-1)
     
@@ -169,12 +174,16 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
 
     # Setup decoding strategy
     if hasattr(asr_model, 'change_decoding_strategy'):
-        asr_model.change_decoding_strategy(cfg.rnnt_decoding)
+        # Check if ctc or rnnt model
+        if hasattr(asr_model, 'joint'):  # RNNT model
+            asr_model.change_decoding_strategy(cfg.rnnt_decoding)
+        else:
+            asr_model.change_decoding_strategy(cfg.ctc_decoding)
 
     # get audio filenames
     if not cfg.is_shelve:
         if cfg.audio_dir is not None:
-            filepaths = list(glob.glob(os.path.join(cfg.audio_dir, f"*.{cfg.audio_type}")))
+            filepaths = list(glob.glob(os.path.join(cfg.audio_dir, f"**/*.{cfg.audio_type}"), recursive=True))
         else:
             # get filenames from manifest
             filepaths = []
@@ -182,6 +191,7 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
                 logging.error(f"The input dataset_manifest {cfg.dataset_manifest} is empty. Exiting!")
                 return None
     
+            manifest_dir = Path(cfg.dataset_manifest).parent
             with open(cfg.dataset_manifest, 'r') as f:
                 has_two_fields = []
                 for line in f:
@@ -190,7 +200,10 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
                         has_two_fields.append(True)
                     else:
                         has_two_fields.append(False)
-                    filepaths.append(item['audio_filepath'])
+                    audio_file = Path(item['audio_filepath'])
+                    if not audio_file.is_file() and not audio_file.is_absolute():
+                        audio_file = manifest_dir / audio_file
+                    filepaths.append(str(audio_file.absolute()))
             partial_audio = all(has_two_fields)
     else:
         if not (os.path.exists(cfg.dataset_manifest) and os.path.isfile(os.path.join(cfg.dataset_manifest, "db.dat"))):

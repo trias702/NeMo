@@ -170,6 +170,7 @@ trainer:
   sync_batchnorm: true
   enable_checkpointing: False  # Provided by exp_manager
   logger: false  # Provided by exp_manager
+  benchmark: false # needs to be false for models with variable-length speech input as it slows down training
 
 
 exp_manager:
@@ -189,6 +190,7 @@ exp_manager:
     name: null
     project: null
     entity: null
+    save_dir: null
 
   resume_if_exists: false
   resume_ignore_no_checkpoint: false
