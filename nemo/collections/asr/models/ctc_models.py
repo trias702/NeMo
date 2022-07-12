@@ -572,7 +572,14 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
     # PTL-specific methods
     def training_step(self, batch, batch_nb):
         signal, signal_len, transcript, transcript_len = batch
-        self.num_updates += 1
+        if (
+            self.training
+            and hasattr(self, "num_updates")
+            and hasattr(self, "trainer")
+            and self.trainer is not None
+        ):
+            #self.num_updates += 1
+            self.num_updates = self.trainer.global_step + 1
         
         if isinstance(batch, DALIOutputs) and batch.has_processed_signal:
             log_probs, encoded_len, predictions = self.forward(

@@ -192,7 +192,7 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
                 return None
     
             manifest_dir = Path(cfg.dataset_manifest).parent
-            with open(cfg.dataset_manifest, 'r') as f:
+            with open(cfg.dataset_manifest, 'r', encoding='utf_8') as f:
                 has_two_fields = []
                 for line in f:
                     item = json.loads(line)
@@ -311,7 +311,7 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
     if type(transcriptions) == tuple and len(transcriptions) == 2:
         transcriptions = transcriptions[0]
     # write audio transcriptions
-    with open(cfg.output_filename, 'w', encoding='utf-8') as f:
+    with open(cfg.output_filename, 'w', encoding='utf_8', newline='\n') as f:
         if cfg.audio_dir is not None:
             for idx, text in enumerate(transcriptions):
                 item = {'audio_filepath': filepaths[idx], 'pred_text': text}
@@ -327,7 +327,7 @@ def main(cfg: TranscriptionConfig) -> TranscriptionConfig:
                         del meta['sampling_rate']
                         f.write(json.dumps(meta) + "\n")
             else:
-                with open(cfg.dataset_manifest, 'r') as fr:
+                with open(cfg.dataset_manifest, 'r', encoding='utf_8') as fr:
                     for transcript, line in zip(transcriptions, fr):
                         item = json.loads(line)
                         item['pred_text'] = transcript

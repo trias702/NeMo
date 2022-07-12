@@ -20,7 +20,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig, OmegaConf, open_dict
 from omegaconf.errors import ConfigAttributeError
-from pytorch_lightning.loggers import LoggerCollection, TensorBoardLogger, WandbLogger
+from pytorch_lightning.loggers import LoggerCollection, WandbLogger
 from torch import nn
 
 from nemo.collections.common.parts.preprocessing import parsers
@@ -286,14 +286,10 @@ class Tacotron2Model(SpectrogramGenerator):
             logger = self.logger.experiment
             if isinstance(self.logger, LoggerCollection):
                 for logger in self.logger:
-                    if isinstance(logger, TensorBoardLogger):
+                    if isinstance(logger, WandbLogger):
                         logger = logger.experiment
                         break
-            if isinstance(logger, TensorBoardLogger):
-                tacotron2_log_to_tb_func(
-                    logger, outputs[0].values(), self.global_step, tag="val", log_images=True, add_audio=False,
-                )
-            elif isinstance(logger, WandbLogger):
+            if isinstance(logger, WandbLogger):
                 tacotron2_log_to_wandb_func(
                     logger, outputs[0].values(), self.global_step, tag="val", log_images=True, add_audio=False,
                 )

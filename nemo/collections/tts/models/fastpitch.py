@@ -19,7 +19,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf, open_dict
 from pytorch_lightning import Trainer
-from pytorch_lightning.loggers import LoggerCollection, TensorBoardLogger
+from pytorch_lightning.loggers import LoggerCollection
 
 from nemo.collections.common.parts.preprocessing import parsers
 from nemo.collections.tts.helpers.helpers import plot_alignment_to_numpy, plot_spectrogram_to_numpy
@@ -192,6 +192,8 @@ class FastPitchModel(SpectrogramGenerator, Exportable):
 
     @property
     def tb_logger(self):
+        return None
+        '''
         if self._tb_logger is None:
             if self.logger is None and self.logger.experiment is None:
                 return None
@@ -203,6 +205,7 @@ class FastPitchModel(SpectrogramGenerator, Exportable):
                         break
             self._tb_logger = tb_logger
         return self._tb_logger
+        '''
 
     @property
     def parser(self):
@@ -353,6 +356,7 @@ class FastPitchModel(SpectrogramGenerator, Exportable):
             self.log("t_bin_loss", bin_loss)
 
         # Log images to tensorboard
+        '''
         if self.log_train_images and isinstance(self.logger, TensorBoardLogger):
             self.log_train_images = False
 
@@ -375,6 +379,7 @@ class FastPitchModel(SpectrogramGenerator, Exportable):
                 self.tb_logger.add_image(
                     "train_soft_attn", plot_alignment_to_numpy(soft_attn.T), self.global_step, dataformats="HWC",
                 )
+        '''
 
         return loss
 
@@ -435,6 +440,7 @@ class FastPitchModel(SpectrogramGenerator, Exportable):
 
         _, _, _, _, spec_target, spec_predict = outputs[0].values()
 
+        '''
         if isinstance(self.logger, TensorBoardLogger):
             self.tb_logger.add_image(
                 "val_mel_target",
@@ -447,6 +453,7 @@ class FastPitchModel(SpectrogramGenerator, Exportable):
                 "val_mel_predicted", plot_spectrogram_to_numpy(spec_predict), self.global_step, dataformats="HWC",
             )
             self.log_train_images = True
+        '''
 
     def __setup_dataloader_from_config(self, cfg, shuffle_should_be: bool = True, name: str = "train"):
         if "dataset" not in cfg or not isinstance(cfg.dataset, DictConfig):
