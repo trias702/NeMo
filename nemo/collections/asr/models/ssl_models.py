@@ -167,6 +167,8 @@ class SpeechEncDecSelfSupervisedModel(ModelPT, ASRModuleMixin, AccessMixin):
                 augmentor=augmentor,
             )
             shuffle = False
+        elif config.get('is_shelve', False):
+            dataset = audio_to_text_dataset.get_shelve_dataset(config=config, augmentor=augmentor)
         else:
             if 'manifest_filepath' in config and config['manifest_filepath'] is None:
                 logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
