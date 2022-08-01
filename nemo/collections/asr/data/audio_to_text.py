@@ -446,7 +446,11 @@ class _AudioTextShelveDataset(Dataset):
         added = 0
         skipped = 0
         for i, kk in enumerate(self.keys):
-            meta = self.db[kk][-1]
+            try:
+                meta = self.db[kk][-1]
+            except:
+                skipped += 1
+                continue
             if 'duration' in meta:
                 duration = float(meta['duration'])
             else:
