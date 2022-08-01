@@ -67,7 +67,7 @@ def item_iter(
 
     k = -1
     for manifest_file in manifests_files:
-        with open(expanduser(manifest_file), 'r') as f:
+        with open(expanduser(manifest_file), 'r', encoding='utf_8') as f:
             for line in f:
                 k += 1
                 item = parse_func(line, manifest_file)
