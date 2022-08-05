@@ -75,7 +75,7 @@ def beam_search_eval(
         alpha=beam_alpha,
         beta=beam_beta,
         lm_path=lm_path,
-        num_cpus=max(os.cpu_count(), 1),
+        num_cpus=max(int(os.cpu_count() * 0.75), 1),
         input_tensor=False,
     )
 
@@ -99,7 +99,8 @@ def beam_search_eval(
         # disabling type checking
         with nemo.core.typecheck.disable_checks():
             probs_batch = all_probs[batch_idx * beam_batch_size : (batch_idx + 1) * beam_batch_size]
-            beams_batch = beam_search_lm.forward(log_probs=probs_batch, log_probs_length=None,)
+            #beams_batch = beam_search_lm.forward(log_probs=probs_batch, log_probs_length=None,)
+            beams_batch = beam_search_lm.forward(log_probs=[kenlm_utils.softmax(logits) for logits in probs_batch], log_probs_length=None,)
 
         for beams_idx, beams in enumerate(beams_batch):
             target = target_transcripts[sample_idx + beams_idx]
@@ -112,6 +113,7 @@ def beam_search_eval(
                 if ids_to_text_func is not None:
                     # For BPE encodings, need to shift by TOKEN_OFFSET to retrieve the original sub-word ids
                     pred_text = ids_to_text_func([ord(c) - TOKEN_OFFSET for c in candidate[1]])
+                    #pred_text = candidate[1]
                 else:
                     pred_text = candidate[1]
                 pred_split_w = pred_text.split()
@@ -266,8 +268,8 @@ def main():
 
         with autocast():
             with torch.no_grad():
-                all_logits = asr_model.transcribe(audio_file_paths, batch_size=args.acoustic_batch_size, logprobs=True)
-        all_probs = [kenlm_utils.softmax(logits) for logits in all_logits]
+                all_probs = asr_model.transcribe(audio_file_paths, batch_size=args.acoustic_batch_size, logprobs=True)
+        #all_probs = [kenlm_utils.softmax(logits) for logits in all_logits]
         if args.probs_cache_file:
             logging.info(f"Writing pickle files of probabilities at '{args.probs_cache_file}'...")
             with open(args.probs_cache_file, 'wb') as f_dump:

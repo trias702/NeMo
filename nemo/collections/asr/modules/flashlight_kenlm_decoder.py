@@ -140,9 +140,10 @@ class FlashLightKenLMBeamSearchDecoder(NeuralModule):
                 _, score = self.lm.score(start_state, word_idx)
                 for spelling in spellings:
                     spelling_idxs = [self.tokenizer.token_to_id(token) for token in spelling]
-                    assert (
-                        self.tokenizer.unk_id not in spelling_idxs
-                    ), f"{spelling} {spelling_idxs}"
+                    #assert (self.tokenizer.unk_id not in spelling_idxs), f"{spelling} {spelling_idxs}"
+                    if self.tokenizer.unk_id in spelling_idxs:
+                        print(f'tokenizer has unknown id for word[ {word} ] {spelling} {spelling_idxs}', flush=True)
+                        continue
                     self.trie.insert(spelling_idxs, word_idx, score)
             self.trie.smear(SmearingMode.MAX)
     
