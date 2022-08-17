@@ -19,7 +19,10 @@ from math import ceil
 from typing import Dict, List, Optional, Union
 
 import torch
-from nemo_text_processing.text_normalization.normalize_with_audio import NormalizerWithAudio
+try:
+    from nemo_text_processing.text_normalization.normalize_with_audio import NormalizerWithAudio
+except:
+    pass
 from omegaconf import DictConfig
 from pytorch_lightning import Trainer
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, DataCollatorForSeq2Seq
