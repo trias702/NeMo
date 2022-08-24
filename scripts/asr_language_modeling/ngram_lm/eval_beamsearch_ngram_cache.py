@@ -132,9 +132,10 @@ def beam_search_eval(
                     wer_dist_first += wer_dist
                     cer_dist_first += cer_dist
 
-                score = candidate[0]
-                if preds_output_file:
-                    preds_output_file.write('{}\t{}\n'.format(pred_text, score))
+                    score = candidate[0]
+                    if preds_output_file:
+                        preds_output_file.write('{}\t{}\n'.format(pred_text, score))
+
             wer_dist_best += wer_dist_min
             cer_dist_best += cer_dist_min
         sample_idx += len(probs_batch)
