@@ -88,7 +88,7 @@ class ConformerLayer(torch.nn.Module, AdapterModuleMixin, AccessMixin):
         self.dropout = nn.Dropout(dropout)
         self.norm_out = LayerNorm(d_model)
 
-    def forward(self, x, att_mask=None, pos_emb=None, pad_mask=None):
+    def forward(self, x, att_mask=None, pos_emb=None, pad_mask=None, layer_past=None):
         """
         Args:
             x (torch.Tensor): input signals (B, T, d_model)
@@ -105,11 +105,11 @@ class ConformerLayer(torch.nn.Module, AdapterModuleMixin, AccessMixin):
 
         x = self.norm_self_att(residual)
         if self.self_attention_model == 'rel_pos':
-            x = self.self_attn(query=x, key=x, value=x, mask=att_mask, pos_emb=pos_emb)
+            x, past = self.self_attn(query=x, key=x, value=x, mask=att_mask, pos_emb=pos_emb, layer_past=layer_past)
         elif self.self_attention_model == 'abs_pos':
-            x = self.self_attn(query=x, key=x, value=x, mask=att_mask)
+            x, past = self.self_attn(query=x, key=x, value=x, mask=att_mask, layer_past=layer_past)
         else:
-            x = None
+            x, past = None, None
         residual = residual + self.dropout(x)
 
         x = self.norm_conv(residual)
@@ -129,7 +129,7 @@ class ConformerLayer(torch.nn.Module, AdapterModuleMixin, AccessMixin):
         if self.is_access_enabled() and self.access_cfg.get('save_encoder_tensors', False):
             self.register_accessible_tensor(name='encoder', tensor=x)
 
-        return x
+        return x, past
 
 
 class ConformerConvolution(nn.Module):

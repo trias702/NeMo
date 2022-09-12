@@ -112,13 +112,14 @@ class MultiHeadAttention(nn.Module):
 
         return self.linear_out(x)  # (batch, time1, d_model)
 
-    def forward(self, query, key, value, mask, pos_emb=None):
+    def forward(self, query, key, value, mask, pos_emb=None, layer_past=None):
         """Compute 'Scaled Dot Product Attention'.
         Args:
             query (torch.Tensor): (batch, time1, size)
             key (torch.Tensor): (batch, time2, size)
             value(torch.Tensor): (batch, time2, size)
             mask (torch.Tensor): (batch, time1, time2)
+            layer_past (tuple): ((batch, head, time2, size), (batch, head, time2, size))
         returns:
             output (torch.Tensor): transformed `value` (batch, time1, d_model) weighted by the query dot key attention
         """
@@ -126,10 +127,18 @@ class MultiHeadAttention(nn.Module):
         # temporary until we solve this more gracefully
         with avoid_float16_autocast_context():
             q, k, v = self.forward_qkv(query, key, value)
+            
+            if layer_past is not None:
+                past_key, past_value = layer_past
+                k = torch.cat((past_key, k), dim=-2)
+                v = torch.cat((past_value, v), dim=-2)
+            
+            present = (k, v)
+            
             scores = torch.matmul(q, k.transpose(-2, -1)) / self.s_d_k
             out = self.forward_attention(v, scores, mask)
 
-        return out
+        return out, present
 
 
 class RelPositionMultiHeadAttention(MultiHeadAttention):
@@ -172,7 +181,7 @@ class RelPositionMultiHeadAttention(MultiHeadAttention):
         x = x[:, :, 1:].view(b, h, qlen, pos_len)  # (b, h, t1, t2)
         return x
 
-    def forward(self, query, key, value, mask, pos_emb):
+    def forward(self, query, key, value, mask, pos_emb, layer_past=None):
         """Compute 'Scaled Dot Product Attention' with rel. positional encoding.
         Args:
             query (torch.Tensor): (batch, time1, size)
@@ -180,6 +189,7 @@ class RelPositionMultiHeadAttention(MultiHeadAttention):
             value(torch.Tensor): (batch, time2, size)
             mask (torch.Tensor): (batch, time1, time2)
             pos_emb (torch.Tensor) : (batch, time1, size)
+            layer_past (tuple): ((batch, head, time2, size), (batch, head, time2, size))
         Returns:
             output (torch.Tensor): transformed `value` (batch, time1, d_model) weighted by the query dot key attention
         """
@@ -197,7 +207,14 @@ class RelPositionMultiHeadAttention(MultiHeadAttention):
             q_with_bias_u = (q + self.pos_bias_u).transpose(1, 2)
             # (batch, head, time1, d_k)
             q_with_bias_v = (q + self.pos_bias_v).transpose(1, 2)
-
+            
+            if layer_past is not None:
+                past_key, past_value = layer_past
+                k = torch.cat((past_key, k), dim=-2)
+                v = torch.cat((past_value, v), dim=-2)
+            
+            present = (k, v)
+            
             # compute attention score
             # first compute matrix a and matrix c
             # as described in https://arxiv.org/abs/1901.02860 Section 3.3
@@ -214,7 +231,7 @@ class RelPositionMultiHeadAttention(MultiHeadAttention):
             scores = (matrix_ac + matrix_bd) / self.s_d_k  # (batch, head, time1, time2)
             out = self.forward_attention(v, scores, mask)
 
-        return out
+        return out, present
 
 
 class PositionalEncoding(torch.nn.Module):

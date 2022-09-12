@@ -191,7 +191,7 @@ def main() -> None:
         model = model.to(args.device)
     if args.input_manifest is None:
         texts = []
-        with args.input_text.open() as f:
+        with args.input_text.open(encoding='utf_8') as f:
             for line in f:
                 texts.append(line.strip())
     else:
