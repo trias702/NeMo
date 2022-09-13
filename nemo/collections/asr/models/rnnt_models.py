@@ -18,6 +18,7 @@ import os
 import tempfile
 from math import ceil
 from typing import Dict, List, Optional, Union
+import contextlib
 
 import torch
 from omegaconf import DictConfig, OmegaConf, open_dict
@@ -79,6 +80,11 @@ class EncDecRNNTModel(ASRModel, ASRModuleMixin, Exportable):
             self.spec_augmentation = EncDecRNNTModel.from_config_dict(self.cfg.spec_augment)
         else:
             self.spec_augmentation = None
+        
+        if hasattr(self.cfg, 'freeze_finetune_updates') and self.cfg.freeze_finetune_updates is not None:
+            self.freeze_finetune_updates = self.cfg.freeze_finetune_updates
+        else:
+            self.freeze_finetune_updates = 0
 
         # Setup decoding objects
         self.decoding = RNNTDecoding(
@@ -668,12 +674,21 @@ class EncDecRNNTModel(ASRModel, ASRModuleMixin, Exportable):
             AccessMixin.reset_registry(self)
 
         signal, signal_len, transcript, transcript_len = batch
+        num_updates = 0
+        if (
+            self.training
+            and hasattr(self, "trainer")
+            and self.trainer is not None
+        ):
+            num_updates = self.trainer.global_step + 1
 
         # forward() only performs encoder forward
-        if isinstance(batch, DALIOutputs) and batch.has_processed_signal:
-            encoded, encoded_len = self.forward(processed_signal=signal, processed_signal_length=signal_len)
-        else:
-            encoded, encoded_len = self.forward(input_signal=signal, input_signal_length=signal_len)
+        ft = self.freeze_finetune_updates <= num_updates
+        with torch.no_grad() if not ft else contextlib.ExitStack():
+            if isinstance(batch, DALIOutputs) and batch.has_processed_signal:
+                encoded, encoded_len = self.forward(processed_signal=signal, processed_signal_length=signal_len)
+            else:
+                encoded, encoded_len = self.forward(input_signal=signal, input_signal_length=signal_len)
         del signal
 
         # During training, loss must be computed, so decoder forward is necessary
