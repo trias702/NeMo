@@ -471,7 +471,7 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
         print('batch_concat_states: ', type(batch_states), flush=True)
         print('batch_concat_states: ', len(batch_states), flush=True)
         
-        if type(batch_states) is list:
+        if isinstance(batch_states, list):
             if len(batch_states) == 1:
                 return batch_states[0]
             else:

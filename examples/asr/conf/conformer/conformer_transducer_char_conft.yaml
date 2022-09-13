@@ -34,7 +34,7 @@ model:
   model_defaults:
     enc_hidden: ${model.encoder.d_model}
     pred_hidden: 512
-    joint_hidden: 512
+    joint_hidden: 640
 
   train_ds:
     manifest_filepath: ???
@@ -79,9 +79,11 @@ model:
     window: "hann"
     features: 80
     n_fft: 512
+    log: true
     frame_splicing: 1
     dither: 0.00001
     pad_to: 0
+    pad_value: 0.0
 
   spec_augment:
     _target_: nemo.collections.asr.modules.SpectrogramAugmentation
@@ -94,7 +96,7 @@ model:
     _target_: nemo.collections.asr.modules.ConformerEncoder
     feat_in: ${model.preprocessor.features}
     feat_out: -1 # you may set it if you need different output size other than the default d_model
-    n_layers: 17
+    n_layers: 18
     d_model: 512
 
     # Sub-sampling params
@@ -162,6 +164,8 @@ model:
     fused_batch_size: 16
 
     jointnet:
+      encoder_hidden: ${model.model_defaults.enc_hidden}
+      pred_hidden: ${model.model_defaults.pred_hidden}
       joint_hidden: ${model.model_defaults.joint_hidden}
       activation: "relu"
       dropout: 0.1
@@ -176,7 +180,7 @@ model:
     # beam strategy config
     beam:
       beam_size: 2
-      return_best_hypothesis: False
+      return_best_hypothesis: false
       score_norm: true
       tsd_max_sym_exp: 50  # for Time Synchronous Decoding
       alsd_max_target_len: 2.0  # for Alignment-Length Synchronous Decoding
