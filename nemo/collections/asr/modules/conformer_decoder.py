@@ -358,7 +358,7 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
         self.use_pad_mask = on
         return mask
     
-    def initialize_state(self, y: torch.Tensor):
+    def initialize_state(self, y):
         """
         Initialize the state of the RNN layers, with same dtype and device as input `y`.
 
@@ -372,7 +372,10 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
                 H = Hidden size of RNN.
         """
         batch = y.size(0)
-        T = y.size(1)
+        if y.ndim == 1:
+            T = 1
+        else:
+            T = y.size(1)
         if self.random_state_sampling and self.training:
             state = tuple(
                 (torch.randn(batch, self.n_heads, T, self.d_head, dtype=y.dtype, device=y.device),
@@ -386,7 +389,7 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
             for _ in range(len(self.layers)))
         return state
 
-    def score_hypothesis(self, hypothesis, cache) -> (torch.Tensor, List[torch.Tensor], torch.Tensor):
+    def score_hypothesis(self, hypothesis, cache):
         """
         Similar to the predict() method, instead this method scores a Hypothesis during beam search.
         Hypothesis is a dataclass representing one hypothesis in a Beam Search.
@@ -402,7 +405,7 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
             lm_token is the final integer token of the hypothesis.
         """
         if hypothesis.dec_state is not None:
-            device = hypothesis.dec_state[0].device
+            device = hypothesis.dec_state[0][0].device
         else:
             _p = next(self.parameters())
             device = _p.device
@@ -481,11 +484,11 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
     
     def batch_copy_states(
         self,
-        old_states: List[torch.Tensor],
-        new_states: List[torch.Tensor],
-        ids: List[int],
-        value: Optional[float] = None,
-    ) -> List[torch.Tensor]:
+        old_states,
+        new_states,
+        ids,
+        value = None,
+    ):
         """Copy states from new state to old state at certain indices.
 
         Args:
@@ -502,19 +505,21 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
         Returns:
             batch of decoder states with partial copy at ids (or a specific value).
                 (L x B x H, L x B x H)
-        """
+        
         for layer_id in range(len(old_states)):
             if value is None:
-                old_states[layer_id][ids, :, :, :] = new_states[layer_id][ids, :, :, :]
+                for idx in range(len(old_states[layer_id])):
+                    old_states[layer_id][idx][ids, :, :, :] = new_states[layer_id][idx][ids, :, :, :]
             else:
-                old_states[layer_id][ids, :, :, :] *= 0.0
-                old_states[layer_id][ids, :, :, :] += value
-
+                for idx in range(len(old_states[layer_id])):
+                    old_states[layer_id][idx][ids, :, :, :] *= 0.0
+                    old_states[layer_id][idx][ids, :, :, :] += value
+        """
         return old_states
     
     def batch_score_hypothesis(
-        self, hypotheses: List[rnnt_utils.Hypothesis], cache: Dict[Tuple[int], Any], batch_states
-    ) -> (torch.Tensor, List[torch.Tensor], torch.Tensor):
+        self, hypotheses: List[rnnt_utils.Hypothesis], cache, batch_states
+    ):
         """
         Used for batched beam search algorithms. Similar to score_hypothesis method.
 
@@ -567,7 +572,7 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
             )  # [B, 1, H], List([L, 1, H])
 
             #dec_states = tuple(state.to(dtype=dtype) for state in dec_states)
-            dec_states = tuple((layer[0].to(dtype=dtype), layer[1].to(dtype=dtype)) for layer in dec_states)
+            dec_states = tuple((layer[0][:, :, :-1, :].to(dtype=dtype), layer[1][:, :, :-1, :].to(dtype=dtype)) for layer in dec_states)
 
         # Update done states and cache shared by entire batch.
         j = 0
@@ -598,21 +603,21 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
         """
         Create batch of decoder states.
 
-       Args:
+        Args:
            batch_states (list): batch of decoder states
               ([L x (B, H)], [L x (B, H)])
 
            decoder_states (list of list): list of decoder states
                [B x ([L x (1, H)], [L x (1, H)])]
 
-       Returns:
+        Returns:
            batch_states (tuple): batch of decoder states
                ([L x (B, H)], [L x (B, H)])
-       """
+        """
         new_states = []
         for layer in range(len(self.layers)):
-            k = torch.cat([kx[0] for kx in decoder_states[layer]], dim=0)
-            v = torch.cat([vx[1] for vx in decoder_states[layer]], dim=0)
+            k = torch.cat([x[layer][0] for x in decoder_states], dim=0)
+            v = torch.cat([x[layer][1] for x in decoder_states], dim=0)
             new_states.append((k, v))
 
         return tuple(new_states)
