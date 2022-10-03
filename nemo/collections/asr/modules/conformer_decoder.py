@@ -433,6 +433,7 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
                 y, new_state = self.predict(target, state=hypothesis.dec_state, add_sos=False, batch_size=1)  # [1, 1, H]
 
             y = y[:, -1:, :]  # Extract just last state : [1, 1, H]
+            new_state = tuple((layer[0][:, :, -1:, :], layer[1][:, :, -1:, :]) for layer in new_state)
             cache[sequence] = (y, new_state)
 
         return y, new_state, lm_token
@@ -515,7 +516,9 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
                     old_states[layer_id][idx][ids, :, :, :] *= 0.0
                     old_states[layer_id][idx][ids, :, :, :] += value
         """
-        return old_states
+        x1 = tuple((layer[0][:, :, -1:, :], layer[1][:, :, -1:, :]) for layer in old_states)
+        
+        return x1
     
     def batch_score_hypothesis(
         self, hypotheses: List[rnnt_utils.Hypothesis], cache, batch_states
