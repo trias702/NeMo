@@ -514,7 +514,7 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
             if value is None:
                 for idx in range(len(old_states[layer_id])):
                     #old_states[layer_id][idx][ids, :, :, :] = new_states[layer_id][idx][ids, :, :, :]
-                    old_states[layer_id][idx][ids, :, -1, :] *= 0.0
+                    old_states[layer_id][idx][ids, :, -1, :] *= 1.0
             else:
                 for idx in range(len(old_states[layer_id])):
                     old_states[layer_id][idx][ids, :, :, :] *= 0.0

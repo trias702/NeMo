@@ -119,6 +119,7 @@ def beam_search_eval(
                     #pred_text = candidate[1]
                 else:
                     pred_text = candidate[1]
+                #pred_text = pred_text.replace('、','').replace('。','').replace('？','').strip()
                 pred_split_w = pred_text.split()
                 wer_dist = editdistance.eval(target_split_w, pred_split_w)
                 pred_split_c = list(pred_text)
