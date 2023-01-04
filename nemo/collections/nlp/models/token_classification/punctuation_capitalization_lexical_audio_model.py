@@ -291,7 +291,7 @@ class PunctuationCapitalizationLexicalAudioModel(PunctuationCapitalizationModel)
         margin: int = 16,
         return_labels: bool = False,
         dataloader_kwargs: Dict[str, Any] = None,
-        audio_queries: Optional[List[str]] = None,
+        audio_queries: Optional[List[Any]] = None,
         target_sr: Optional[int] = None,
     ) -> List[str]:
         """
