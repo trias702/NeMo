@@ -43,11 +43,11 @@ class FlashLightKenLMBeamSearchDecoder(NeuralModule):
             self.model = asr_model
             
             if not hasattr(asr_model, 'tokenizer'):
-                self.reverse_map = {v:k for k,v in asr_model._wer.labels_map.items()}
+                self.reverse_map = {v:k for k,v in asr_model._wer.decoding.labels_map.items()}
         
         @property
         def blank(self):
-            return self.model._wer.blank_id
+            return self.model._wer.decoding.blank_id
         
         @property
         def unk_id(self):
@@ -123,7 +123,7 @@ class FlashLightKenLMBeamSearchDecoder(NeuralModule):
         #self.blank = int(tokenizer.vocab_size)
         self.vocab_size = self.tokenizer.vocab_size
         self.blank = self.tokenizer.blank
-        self.silence = 0
+        self.silence = self.tokenizer.unk_id
         self.unit_lm = unit_lm
             
         if lexicon_path is not None:
