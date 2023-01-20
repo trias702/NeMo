@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 from math import ceil
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -98,6 +98,7 @@ class PunctuationCapitalizationLexicalAudioModel(PunctuationCapitalizationModel)
             self.audio_encoder = nemo_asr.models.ASRModel.from_pretrained(
                 cfg.audio_encoder.pretrained_model, override_config_path=audio_cfg
             )
+
         if cfg.audio_encoder.adapter.get('enable', False):
             with open_dict(cfg):
                 cfg.audio_encoder.adapter.config.in_features = self.audio_encoder.cfg.decoder.feat_in
@@ -112,6 +113,7 @@ class PunctuationCapitalizationLexicalAudioModel(PunctuationCapitalizationModel)
             inner_size=cfg.audio_encoder.fusion.inner_size,
             num_attention_heads=cfg.audio_encoder.fusion.num_attention_heads,
         )
+
         if hasattr(self.audio_encoder.cfg, 'decoder.feat_in'):
             self.audio_proj = Linear(
                 self.audio_encoder.cfg.decoder.feat_in, self.bert_model(**self.bert_model.input_example()[0]).size()[-1]
@@ -291,7 +293,7 @@ class PunctuationCapitalizationLexicalAudioModel(PunctuationCapitalizationModel)
         margin: int = 16,
         return_labels: bool = False,
         dataloader_kwargs: Dict[str, Any] = None,
-        audio_queries: Optional[List[Any]] = None,
+        audio_queries: Optional[Union[List[bytes],List[str]]] = None,
         target_sr: Optional[int] = None,
     ) -> List[str]:
         """

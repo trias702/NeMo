@@ -301,4 +301,5 @@ AVAILABLE_SCHEDULER_PARAMS = {
     'PolynomialDecayAnnealingParams': PolynomialDecayAnnealingParams,
     'PolynomialHoldDecayAnnealingParams': PolynomialHoldDecayAnnealingParams,
     'TriStageAnnealingParams': TriStageAnnealingParams,
+    'ReduceLROnPlateauParams': ReduceLROnPlateauParams,
 }

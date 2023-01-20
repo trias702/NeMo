@@ -54,13 +54,13 @@ class MegatronRetrievalTransformerEncoderModule(MegatronModule):
         pre_process=True,
         post_process=True,
         use_cpu_initialization=False,
-        attn_mask_type=AttnMaskType.padding,
         hidden_dropout=0.1,
         attention_dropout=0.1,
         precision=16,
         fp32_residual_connection=False,
         activations_checkpoint_method=None,
         activations_checkpoint_num_layers=1,
+        activations_checkpoint_granularity=None,
         layernorm_epsilon=1e-5,
         bias_activation_fusion=True,
         bias_dropout_add_fusion=True,
@@ -77,6 +77,8 @@ class MegatronRetrievalTransformerEncoderModule(MegatronModule):
         layer_number_offset=0,  # this is use only for attention norm_factor scaling
         sequence_parallel=False,
         gradient_accumulation_fusion=False,
+        normalize_attention_scores=True,
+        megatron_legacy=False,
     ):
         super(MegatronRetrievalTransformerEncoderModule, self).__init__()
 
@@ -86,7 +88,6 @@ class MegatronRetrievalTransformerEncoderModule(MegatronModule):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.init_method = init_method
-        self.model_attn_mask_type = attn_mask_type
         self.hidden_dropout = hidden_dropout
         self.output_layer_init_method = output_layer_init_method
         self.parent_model_type = parent_model_type
@@ -109,19 +110,20 @@ class MegatronRetrievalTransformerEncoderModule(MegatronModule):
             kv_channels=kv_channels,
             layer_type=layer_type,
             ffn_hidden_size=ffn_hidden_size,
-            self_attn_mask_type=self.model_attn_mask_type,
+            self_attn_mask_type=AttnMaskType.padding,
             pre_process=self.pre_process,
             post_process=self.post_process,
             precision=precision,
             fp32_residual_connection=fp32_residual_connection,
             activations_checkpoint_method=activations_checkpoint_method,
             activations_checkpoint_num_layers=activations_checkpoint_num_layers,
+            activations_checkpoint_granularity=activations_checkpoint_granularity,
             layernorm_epsilon=layernorm_epsilon,
             hidden_dropout=hidden_dropout,
             attention_dropout=attention_dropout,
             use_cpu_initialization=use_cpu_initialization,
             bias_activation_fusion=bias_activation_fusion,
-            bias_dropout_fusion=bias_dropout_add_fusion,
+            bias_dropout_add_fusion=bias_dropout_add_fusion,
             masked_softmax_fusion=masked_softmax_fusion,
             persist_layer_norm=persist_layer_norm,
             openai_gelu=openai_gelu,
@@ -135,6 +137,8 @@ class MegatronRetrievalTransformerEncoderModule(MegatronModule):
             layer_number_offset=layer_number_offset,
             sequence_parallel=sequence_parallel,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
+            normalize_attention_scores=normalize_attention_scores,
+            megatron_legacy=megatron_legacy,
         )
         rot_dim = hidden_size // num_attention_heads if kv_channels is None else kv_channels
         # partial rotary embeddings, which is better than full rotary
@@ -259,7 +263,7 @@ class MegatronRetrievalTransformerEncoderModule(MegatronModule):
 
         # # convert to Megatron mask
         enc_attn_mask_3d = build_attention_mask_3d(
-            source_mask=enc_attn_mask, target_mask=enc_attn_mask, attn_mask_type=self.model_attn_mask_type,
+            source_mask=enc_attn_mask, target_mask=enc_attn_mask, attn_mask_type=AttnMaskType.padding,
         )
         enc_attn_mask_3d = enc_attn_mask_3d[:, None, :, :]
 
@@ -324,13 +328,13 @@ class MegatronRetrievalTransformerDecoderModule(MegatronModule):
         pre_process=True,
         post_process=True,
         use_cpu_initialization=False,
-        attn_mask_type=AttnMaskType.causal,
         hidden_dropout=0.1,
         attention_dropout=0.1,
         precision=16,
         fp32_residual_connection=False,
         activations_checkpoint_method=None,
         activations_checkpoint_num_layers=1,
+        activations_checkpoint_granularity=None,
         layernorm_epsilon=1e-5,
         bias_activation_fusion=True,
         bias_dropout_add_fusion=True,
@@ -347,6 +351,8 @@ class MegatronRetrievalTransformerDecoderModule(MegatronModule):
         layer_number_offset=0,  # this is use only for attention norm_factor scaling
         sequence_parallel=False,
         gradient_accumulation_fusion=False,
+        normalize_attention_scores=True,
+        megatron_legacy=False,
     ):
         super(MegatronRetrievalTransformerDecoderModule, self).__init__()
 
@@ -355,7 +361,6 @@ class MegatronRetrievalTransformerDecoderModule(MegatronModule):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.init_method = init_method
-        self.model_attn_mask_type = attn_mask_type
         self.hidden_dropout = hidden_dropout
         self.output_layer_init_method = output_layer_init_method
         self.parent_model_type = parent_model_type
@@ -378,19 +383,20 @@ class MegatronRetrievalTransformerDecoderModule(MegatronModule):
             kv_channels=kv_channels,
             layer_type=layer_type,
             ffn_hidden_size=ffn_hidden_size,
-            self_attn_mask_type=self.model_attn_mask_type,
+            self_attn_mask_type=AttnMaskType.padding,  # we use attention mask reset, enforce to use padding AttnMaskType, otherwise it has numeric issues
             pre_process=self.pre_process,
             post_process=self.post_process,
             precision=precision,
             fp32_residual_connection=fp32_residual_connection,
             activations_checkpoint_method=activations_checkpoint_method,
             activations_checkpoint_num_layers=activations_checkpoint_num_layers,
+            activations_checkpoint_granularity=activations_checkpoint_granularity,
             layernorm_epsilon=layernorm_epsilon,
             hidden_dropout=hidden_dropout,
             attention_dropout=attention_dropout,
             use_cpu_initialization=use_cpu_initialization,
             bias_activation_fusion=bias_activation_fusion,
-            bias_dropout_fusion=bias_dropout_add_fusion,
+            bias_dropout_add_fusion=bias_dropout_add_fusion,
             masked_softmax_fusion=masked_softmax_fusion,
             persist_layer_norm=persist_layer_norm,
             openai_gelu=openai_gelu,
@@ -404,6 +410,8 @@ class MegatronRetrievalTransformerDecoderModule(MegatronModule):
             layer_number_offset=layer_number_offset,
             sequence_parallel=sequence_parallel,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
+            normalize_attention_scores=normalize_attention_scores,
+            megatron_legacy=megatron_legacy,
         )
         rot_dim = hidden_size // num_attention_heads if kv_channels is None else kv_channels
         # partial rotary embeddings, which is better than full rotary
@@ -418,9 +426,12 @@ class MegatronRetrievalTransformerDecoderModule(MegatronModule):
 
     def _calculate_dec_att_mask(self, dec_attn_mask, eod_positions):
         # # convert to Megatron mask
+
+        # customized attention mask, starts with causal attention mask
         dec_attn_mask_3d = build_attention_mask_3d(
-            source_mask=dec_attn_mask, target_mask=dec_attn_mask, attn_mask_type=self.model_attn_mask_type,
+            source_mask=dec_attn_mask, target_mask=dec_attn_mask, attn_mask_type=AttnMaskType.causal,
         )
+        # add the attention mask reset
         if eod_positions is not None:
             # to mask out the token ids [id, id,  eod, id, pad, eod, id, id]
             # so attention is not across eod, mask should be:
@@ -484,8 +495,12 @@ class MegatronRetrievalTransformerDecoderModule(MegatronModule):
             ), f'sequence requires {num_seq_chunks} retrieved chunks, but only {k} passed in'  # need to add extra chunk size, since it will be shifted
 
         if retrieved_emb is not None:
+            # -63, -62, ... 63  will be cut into -> [0, ... 63] in the chunk cross attention layer
             cross_attn_q_pos_emb = self.rotary_pos_emb(self.chunk_size * 2 - 1, offset=-self.chunk_size + 1)
             cross_attn_k_pos_emb = self.rotary_pos_emb(rn, offset=0)
+            # TODO, the first 64 tokens in retrieved is from the last chunk, align the continuation part with the query tokens
+            # use the following in the future. [-63, -62, ..., 63, 64]
+            # cross_attn_k_pos_emb = self.rotary_pos_emb(rn, offset=-self.chunk_size + 1)
             attn_pos_emb = (self_attn_emb, cross_attn_q_pos_emb, cross_attn_k_pos_emb)
         else:
             attn_pos_emb = (self_attn_emb, None, None)
@@ -511,7 +526,7 @@ class MegatronRetrievalTransformerDecoderModule(MegatronModule):
 
         # transformer encoder
         if not isinstance(dec_input, tuple):
-            dec_input = rearrange(dec_input, 'b s d -> s b d')
+            dec_input = rearrange(dec_input, 'b s d -> s b d').contiguous()
         enc_output = self.model(
             dec_input,
             dec_attn_mask_3d,

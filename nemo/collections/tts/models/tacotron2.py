@@ -20,7 +20,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import MISSING, DictConfig, OmegaConf, open_dict
 from omegaconf.errors import ConfigAttributeError
-from pytorch_lightning.loggers import LoggerCollection, WandbLogger
+from pytorch_lightning.loggers import WandbLogger
 from torch import nn
 
 from nemo.collections.common.parts.preprocessing import parsers
@@ -284,11 +284,10 @@ class Tacotron2Model(SpectrogramGenerator):
     def validation_epoch_end(self, outputs):
         if self.logger is not None and self.logger.experiment is not None:
             logger = self.logger.experiment
-            if isinstance(self.logger, LoggerCollection):
-                for logger in self.logger:
-                    if isinstance(logger, WandbLogger):
-                        logger = logger.experiment
-                        break
+            for logger in self.trainer.loggers:
+                if isinstance(logger, WandbLogger):
+                    logger = logger.experiment
+                    break
             if isinstance(logger, WandbLogger):
                 tacotron2_log_to_wandb_func(
                     logger, outputs[0].values(), self.global_step, tag="val", log_images=True, add_audio=False,
@@ -305,7 +304,14 @@ class Tacotron2Model(SpectrogramGenerator):
                     'text_normalizer.whitelist', cfg.text_normalizer.whitelist
                 )
 
-            self.normalizer = instantiate(cfg.text_normalizer, **normalizer_kwargs)
+            try:
+                self.normalizer = instantiate(cfg.text_normalizer, **normalizer_kwargs)
+            except Exception as e:
+                logging.error(e)
+                raise ImportError(
+                    "`pynini` not installed, please install via NeMo/nemo_text_processing/pynini_install.sh"
+                )
+
             self.text_normalizer_call = self.normalizer.normalize
             if "text_normalizer_call_kwargs" in cfg:
                 self.text_normalizer_call_kwargs = cfg.text_normalizer_call_kwargs
@@ -372,7 +378,7 @@ class Tacotron2Model(SpectrogramGenerator):
         list_of_models = []
         model = PretrainedModelInfo(
             pretrained_model_name="tts_en_tacotron2",
-            location="https://api.ngc.nvidia.com/v2/models/nvidia/nemo/tts_en_tacotron2/versions/1.0.0/files/tts_en_tacotron2.nemo",
+            location="https://api.ngc.nvidia.com/v2/models/nvidia/nemo/tts_en_tacotron2/versions/1.10.0/files/tts_en_tacotron2.nemo",
             description="This model is trained on LJSpeech sampled at 22050Hz, and can be used to generate female English voices with an American accent.",
             class_=cls,
             aliases=["Tacotron2-22050Hz"],

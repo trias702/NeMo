@@ -16,24 +16,22 @@
 from omegaconf.omegaconf import OmegaConf, open_dict
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelSummary
-from pytorch_lightning.callbacks.timer import Timer
-from pytorch_lightning.plugins.environments.torchelastic_environment import TorchElasticEnvironment
+from pytorch_lightning.plugins.environments import TorchElasticEnvironment
 from pytorch_lightning.trainer.connectors.checkpoint_connector import CheckpointConnector
 
-from nemo.collections.nlp.data.machine_translation.preproc_mt_data import MTDataPreproc
 from nemo.collections.nlp.models.language_modeling.megatron_bart_model import MegatronBARTModel
 from nemo.collections.nlp.models.language_modeling.megatron_t5_model import MegatronT5Model
 from nemo.collections.nlp.models.machine_translation.megatron_nmt_model import MegatronNMTModel
 from nemo.collections.nlp.parts.nlp_overrides import (
     GradScaler,
     MegatronHalfPrecisionPlugin,
-    NLPDDPPlugin,
+    NLPDDPStrategy,
     NLPSaveRestoreConnector,
     PipelineMixedPrecisionPlugin,
 )
 from nemo.core.config import hydra_runner
 from nemo.utils import logging
-from nemo.utils.exp_manager import StatelessTimer, exp_manager
+from nemo.utils.exp_manager import exp_manager
 
 
 @hydra_runner(config_path="conf", config_name="aayn_base_megatron")
@@ -42,13 +40,12 @@ def main(cfg) -> None:
     logging.info(f'\n{OmegaConf.to_yaml(cfg)}')
 
     megatron_amp_o2 = cfg.model.get('megatron_amp_O2', False)
-    plugins = [
-        NLPDDPPlugin(
-            no_ddp_communication_hook=True,
-            gradient_as_bucket_view=cfg.model.gradient_as_bucket_view,
-            find_unused_parameters=False,
-        )
-    ]
+    plugins = []
+    strategy = NLPDDPStrategy(
+        no_ddp_communication_hook=True,
+        gradient_as_bucket_view=cfg.model.gradient_as_bucket_view,
+        find_unused_parameters=False,
+    )
     if cfg.trainer.precision in [16, 'bf16']:
         scaler = None
         if cfg.trainer.precision == 16:
@@ -65,12 +62,7 @@ def main(cfg) -> None:
     if cfg.get('cluster_type', None) == 'BCP':
         plugins.append(TorchElasticEnvironment())
 
-    trainer = Trainer(plugins=plugins, **cfg.trainer, callbacks=[ModelSummary(max_depth=3)])
-
-    # tokenizers will be trained and and tarred training data will be created if needed
-    # model config is then updated
-    if cfg.model.preproc_out_dir is not None:
-        MTDataPreproc(cfg=cfg.model, trainer=trainer)
+    trainer = Trainer(plugins=plugins, strategy=strategy, **cfg.trainer, callbacks=[ModelSummary(max_depth=3)])
 
     exp_manager(trainer, cfg.exp_manager)
 
@@ -82,10 +74,6 @@ def main(cfg) -> None:
     logging.info(f'Resuming training from checkpoint: {resume_from_checkpoint}')
 
     trainer._checkpoint_connector = CheckpointConnector(trainer, resume_from_checkpoint=resume_from_checkpoint)
-    # Override timer callback to a stateless one
-    for idx, callback in enumerate(trainer.callbacks):
-        if isinstance(callback, Timer):
-            trainer.callbacks[idx] = StatelessTimer(cfg.trainer.max_time,)
 
     # hydra interpolation does not work here as the interpolation key is lost when PTL saves hparams
     with open_dict(cfg):
@@ -128,8 +116,21 @@ def main(cfg) -> None:
             pretrained_cfg.decoder_tokenizer.sentencepiece_legacy = True
 
             # Override dropout
-            pretrained_cfg.hidden_dropout = cfg.model.hidden_dropout
-            pretrained_cfg.attention_dropout = cfg.model.attention_dropout
+
+            # Old pre-trained checkpoints do not have separate encoder/decoder configurations, so replicate the config to encoder/decoder.
+            if not hasattr(pretrained_cfg, 'encoder'):
+                assert not hasattr(pretrained_cfg, 'decoder')
+                logging.warning(
+                    "No separate configuration for encoder, found in pretrained model, using encoder dropout settings everywhere."
+                )
+                pretrained_cfg.hidden_dropout = cfg.model.encoder.hidden_dropout
+                pretrained_cfg.attention_dropout = cfg.model.encoder.attention_dropout
+            else:
+                assert hasattr(pretrained_cfg, 'decoder') and hasattr(pretrained_cfg, 'encoder')
+                pretrained_cfg.encoder.hidden_dropout = cfg.model.encoder.hidden_dropout
+                pretrained_cfg.encoder.attention_dropout = cfg.model.encoder.attention_dropout
+                pretrained_cfg.decoder.hidden_dropout = cfg.model.decoder.hidden_dropout
+                pretrained_cfg.decoder.attention_dropout = cfg.model.decoder.attention_dropout
 
             # Override precision
             pretrained_cfg.precision = trainer.precision  # Set above from trainer.precision
@@ -168,11 +169,9 @@ def main(cfg) -> None:
         )
     else:
         model = MegatronNMTModel(cfg.model, trainer)
-    if cfg.do_training:
-        trainer.fit(model)
 
-    if cfg.do_testing:
-        trainer.test(model)
+    trainer.fit(model)
+    trainer.validate(model)
 
 
 if __name__ == '__main__':

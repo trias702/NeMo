@@ -1,4 +1,2 @@
 inflect
 regex
-pynini==2.1.4
-transformers>=4.0.1

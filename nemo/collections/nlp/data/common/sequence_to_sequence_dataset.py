@@ -21,7 +21,6 @@ from nemo.collections.common.tokenizers.tokenizer_spec import TokenizerSpec
 from nemo.collections.nlp.data.language_modeling.megatron.dataset_utils import (
     get_indexed_dataset_,
     get_samples_mapping,
-    make_text_memmap_bin_compatibility,
 )
 from nemo.collections.nlp.data.language_modeling.text_memmap_dataset import TextMemMapDataset
 from nemo.core.classes import Dataset
@@ -41,6 +40,9 @@ class SequenceToSequenceDataset(Dataset):
         tgt_tokenizer: TokenizerSpec,
         max_src_seq_length: int,
         max_tgt_seq_length: int,
+        add_bos_to_input: bool = True,
+        add_eos_to_input: bool = True,
+        replace_bos_with_pad: bool = False,
     ):
         super().__init__()
         self.src_file_name = src_file_name
@@ -49,6 +51,9 @@ class SequenceToSequenceDataset(Dataset):
         self.tgt_tokenizer = tgt_tokenizer
         self.max_src_seq_length = max_src_seq_length
         self.max_tgt_seq_length = max_tgt_seq_length
+        self.add_bos_to_input = add_bos_to_input
+        self.add_eos_to_input = add_eos_to_input
+        self.replace_bos_with_pad = replace_bos_with_pad
         assert self.max_src_seq_length > 0
         assert self.max_tgt_seq_length > 0
         self._check_files_exist()
@@ -76,18 +81,23 @@ class SequenceToSequenceDataset(Dataset):
             for i, (src, tgt) in enumerate(zip(f_src, f_tgt)):
                 if i % 10000 == 0 and i != 0:
                     logging.info(f"Read {i} lines from {self.src_file_name} & {self.tgt_file_name}")
-                src = (
-                    [self.src_tokenizer.bos_id]
-                    + self.src_tokenizer.text_to_ids(src.strip())
-                    + [self.src_tokenizer.eos_id]
-                )
+                src = self.src_tokenizer.text_to_ids(src.strip())
+                if self.add_bos_to_input:
+                    src = [self.src_tokenizer.pad_id if self.replace_bos_with_pad else self.src_tokenizer.bos_id] + src
+                if self.add_eos_to_input:
+                    src = src + [self.src_tokenizer.eos_id]
+
                 tgt = (
-                    [self.tgt_tokenizer.bos_id]
+                    [self.tgt_tokenizer.pad_id if self.replace_bos_with_pad else self.tgt_tokenizer.bos_id]
                     + self.tgt_tokenizer.text_to_ids(tgt.strip())
                     + [self.tgt_tokenizer.eos_id]
                 )
-                if len(src) <= self.max_src_seq_length and len(tgt) < self.max_tgt_seq_length:
-                    self.examples.append({'src': src, 'tgt': tgt})
+                # Truncate to max sequence length.
+                if len(src) > self.max_src_seq_length:
+                    src = src[-self.max_src_seq_length + 1 :]
+                if len(tgt) > self.max_tgt_seq_length:
+                    tgt = tgt[-self.max_tgt_seq_length + 1 :]
+                self.examples.append({'src': src, 'tgt': tgt})
 
         logging.info(f'Dataset Length : {len(self.examples)}')
 
@@ -264,13 +274,12 @@ class TextMemmapSequenceToSequenceDataset(IndexedSequenceToSequenceDataset):
         )
 
     def _get_examples(self):
-        self.src_indexed_dataset = TextMemMapDataset(dataset_paths=[self.src_file_name], tokenizer=self.src_tokenizer)
-        self.tgt_indexed_dataset = TextMemMapDataset(dataset_paths=[self.tgt_file_name], tokenizer=self.tgt_tokenizer)
-
-        # Create compatibility with Megatron samples mapping
-        if self.max_num_samples is not None:
-            make_text_memmap_bin_compatibility(self.src_indexed_dataset)
-            make_text_memmap_bin_compatibility(self.tgt_indexed_dataset)
+        self.src_indexed_dataset = TextMemMapDataset(
+            dataset_paths=[self.src_file_name], tokenizer=self.src_tokenizer, header_lines=0
+        )
+        self.tgt_indexed_dataset = TextMemMapDataset(
+            dataset_paths=[self.tgt_file_name], tokenizer=self.tgt_tokenizer, header_lines=0
+        )
 
         assert len(self.src_indexed_dataset) == len(
             self.tgt_indexed_dataset
