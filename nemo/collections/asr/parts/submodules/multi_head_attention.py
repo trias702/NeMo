@@ -128,24 +128,17 @@ class MultiHeadAttention(nn.Module):
 
         return self.linear_out(x)  # (batch, time1, d_model)
 
-<<<<<<< HEAD
-    def forward(self, query, key, value, mask, pos_emb=None, layer_past=None):
-=======
-    def forward(self, query, key, value, mask, pos_emb=None, cache=None, cache_next=None):
->>>>>>> upstream/main
+    def forward(self, query, key, value, mask, pos_emb=None, layer_past=None, cache=None, cache_next=None):
         """Compute 'Scaled Dot Product Attention'.
         Args:
             query (torch.Tensor): (batch, time1, size)
             key (torch.Tensor): (batch, time2, size)
             value(torch.Tensor): (batch, time2, size)
             mask (torch.Tensor): (batch, time1, time2)
-<<<<<<< HEAD
             layer_past (tuple): ((batch, head, time2, size), (batch, head, time2, size))
-=======
             cache (torch.Tensor) : (cache_nums, batch, time_cache, size)
             cache_next (torch.Tensor) : (cache_nums, batch, time_cache_next, size)
 
->>>>>>> upstream/main
         returns:
             output (torch.Tensor): transformed `value` (batch, time1, d_model) weighted by the query dot key attention
         """
@@ -224,11 +217,7 @@ class RelPositionMultiHeadAttention(MultiHeadAttention):
         x = x[:, :, 1:].view(b, h, qlen, pos_len)  # (b, h, t1, t2)
         return x
 
-<<<<<<< HEAD
-    def forward(self, query, key, value, mask, pos_emb, layer_past=None):
-=======
-    def forward(self, query, key, value, mask, pos_emb, cache=None, cache_next=None):
->>>>>>> upstream/main
+    def forward(self, query, key, value, mask, pos_emb, layer_past=None, cache=None, cache_next=None):
         """Compute 'Scaled Dot Product Attention' with rel. positional encoding.
         Args:
             query (torch.Tensor): (batch, time1, size)
@@ -236,12 +225,9 @@ class RelPositionMultiHeadAttention(MultiHeadAttention):
             value(torch.Tensor): (batch, time2, size)
             mask (torch.Tensor): (batch, time1, time2)
             pos_emb (torch.Tensor) : (batch, time1, size)
-<<<<<<< HEAD
             layer_past (tuple): ((batch, head, time2, size), (batch, head, time2, size))
-=======
             cache (torch.Tensor) : (cache_nums, batch, time_cache, size)
             cache_next (torch.Tensor) : (cache_nums, batch, time_cache_next, size)
->>>>>>> upstream/main
         Returns:
             output (torch.Tensor): transformed `value` (batch, time1, d_model) weighted by the query dot key attention
         """

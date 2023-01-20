@@ -118,21 +118,18 @@ class ConformerLayer(torch.nn.Module, AdapterModuleMixin, AccessMixin):
         self.dropout = nn.Dropout(dropout)
         self.norm_out = LayerNorm(d_model)
 
-<<<<<<< HEAD
-    def forward(self, x, att_mask=None, pos_emb=None, pad_mask=None, layer_past=None):
-=======
     def forward(
         self,
         x,
         att_mask=None,
         pos_emb=None,
         pad_mask=None,
+        layer_past=None,
         cache_last_channel=None,
         cache_last_time=None,
         cache_last_channel_next=None,
         cache_last_time_next=None,
     ):
->>>>>>> upstream/main
         """
         Args:
             x (torch.Tensor): input signals (B, T, d_model)
@@ -153,17 +150,13 @@ class ConformerLayer(torch.nn.Module, AdapterModuleMixin, AccessMixin):
 
         x = self.norm_self_att(residual)
         if self.self_attention_model == 'rel_pos':
-<<<<<<< HEAD
-            x, past = self.self_attn(query=x, key=x, value=x, mask=att_mask, pos_emb=pos_emb, layer_past=layer_past)
-        elif self.self_attention_model == 'abs_pos':
-            x, past = self.self_attn(query=x, key=x, value=x, mask=att_mask, layer_past=layer_past)
-=======
             x = self.self_attn(
                 query=x,
                 key=x,
                 value=x,
                 mask=att_mask,
                 pos_emb=pos_emb,
+                layer_past=layer_past,
                 cache=cache_last_channel,
                 cache_next=cache_last_channel_next,
             )
@@ -179,9 +172,8 @@ class ConformerLayer(torch.nn.Module, AdapterModuleMixin, AccessMixin):
             )
         elif self.self_attention_model == 'abs_pos':
             x = self.self_attn(
-                query=x, key=x, value=x, mask=att_mask, cache=cache_last_channel, cache_next=cache_last_channel_next
+                query=x, key=x, value=x, mask=att_mask, layer_past=layer_past, cache=cache_last_channel, cache_next=cache_last_channel_next
             )
->>>>>>> upstream/main
         else:
             x, past = None, None
         residual = residual + self.dropout(x)

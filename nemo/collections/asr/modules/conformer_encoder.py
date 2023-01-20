@@ -468,9 +468,6 @@ class ConformerEncoder(NeuralModule, StreamingEncoder, Exportable):
                 att_mask = att_mask[:, cache_len:]
 
         for lth, layer in enumerate(self.layers):
-<<<<<<< HEAD
-            audio_signal, _ = layer(x=audio_signal, att_mask=att_mask, pos_emb=pos_emb, pad_mask=pad_mask)
-=======
             audio_signal = layer(
                 x=audio_signal,
                 att_mask=att_mask,
@@ -489,7 +486,6 @@ class ConformerEncoder(NeuralModule, StreamingEncoder, Exportable):
                 # and cause an increase in the WER
                 _, pos_emb = self.pos_enc(x=audio_signal, cache_len=cache_len)
                 pad_mask, att_mask = self._create_masks(max_audio_length, length, audio_signal.device)
->>>>>>> upstream/main
 
         if self.out_proj is not None:
             audio_signal = self.out_proj(audio_signal)
