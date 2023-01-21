@@ -150,7 +150,7 @@ class ConformerLayer(torch.nn.Module, AdapterModuleMixin, AccessMixin):
 
         x = self.norm_self_att(residual)
         if self.self_attention_model == 'rel_pos':
-            x = self.self_attn(
+            x, past = self.self_attn(
                 query=x,
                 key=x,
                 value=x,
@@ -171,7 +171,7 @@ class ConformerLayer(torch.nn.Module, AdapterModuleMixin, AccessMixin):
                 cache_next=cache_last_channel_next,
             )
         elif self.self_attention_model == 'abs_pos':
-            x = self.self_attn(
+            x, past = self.self_attn(
                 query=x, key=x, value=x, mask=att_mask, layer_past=layer_past, cache=cache_last_channel, cache_next=cache_last_channel_next
             )
         else:

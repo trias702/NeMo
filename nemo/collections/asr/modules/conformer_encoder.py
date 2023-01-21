@@ -468,7 +468,7 @@ class ConformerEncoder(NeuralModule, StreamingEncoder, Exportable):
                 att_mask = att_mask[:, cache_len:]
 
         for lth, layer in enumerate(self.layers):
-            audio_signal = layer(
+            audio_signal, _ = layer(
                 x=audio_signal,
                 att_mask=att_mask,
                 pos_emb=pos_emb,
