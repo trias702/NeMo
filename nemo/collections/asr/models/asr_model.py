@@ -13,7 +13,7 @@
 # limitations under the License.
 import logging
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Any
 
 import torch
 
@@ -138,6 +138,30 @@ class ASRModel(ModelPT, ABC):
             if valid_gradients < 1:
                 logging.warning(f'detected inf or nan values in gradients! Setting gradients to zero.')
                 self.zero_grad()
+    '''
+    def on_train_batch_start(self, batch: Any, batch_idx: int):
+        """
+        dynamically freeze certain layers
+        """
+        super().on_train_batch_start(batch, batch_idx)
+        
+        if hasattr(self.cfg, 'freeze_finetune_updates') and self.cfg.freeze_finetune_updates is not None:
+            if (
+                self.training
+                and hasattr(self, "trainer")
+                and self.trainer is not None
+            ):
+                num_updates = self.trainer.global_step + 1
+                
+                freeze = num_updates <= self.cfg.freeze_finetune_updates
+                for ml in ["preprocessor", "spec_augmentation", "encoder"]:
+                    if hasattr(self, ml):
+                        if freeze:
+                            getattr(self, ml).freeze()
+                            getattr(self, ml).train()
+                        else:
+                            getattr(self, ml).unfreeze()
+    '''
 
 
 class ExportableEncDecModel(Exportable):
