@@ -579,7 +579,8 @@ class ConformerDecoder(rnnt_abstract.AbstractRNNTDecoder, Exportable, AdapterMod
             )  # [B, 1, H], List([L, 1, H])
 
             #dec_states = tuple(state.to(dtype=dtype) for state in dec_states)
-            dec_states = tuple((layer[0][:, :, :-1, :].to(dtype=dtype), layer[1][:, :, :-1, :].to(dtype=dtype)) for layer in dec_states)
+            #dec_states = tuple((layer[0][:, :, :-1, :].to(dtype=dtype), layer[1][:, :, :-1, :].to(dtype=dtype)) for layer in dec_states)
+            dec_states = tuple((layer[0].to(dtype=dtype), layer[1].to(dtype=dtype)) for layer in dec_states)
 
         # Update done states and cache shared by entire batch.
         j = 0
