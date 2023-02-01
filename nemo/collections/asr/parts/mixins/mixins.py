@@ -146,7 +146,7 @@ class ASRBPEMixin(ABC):
             if 'vocab_path' in self.tokenizer_cfg:
                 vocab_path = self.tokenizer_cfg.get('vocab_path')
             else:
-                vocab_path = os.path.join(self.tokenizer_dir, 'vocab.txt')
+                vocab_path = os.path.join(self.tokenizer_dir, 'vocab.txt' if ('vocab.txt' in os.listdir(self.tokenizer_dir)) else 'vocab.json')
             vocab_path = self.register_artifact('tokenizer.vocab_path', vocab_path)
             self.vocab_path = vocab_path
 
@@ -155,8 +155,8 @@ class ASRBPEMixin(ABC):
                 self.tokenizer_cfg.pop('vocab_path')
 
             self.tokenizer = tokenizers.AutoTokenizer(
-                pretrained_model_name='bert-base-cased',
-                vocab_file=self.vocab_path,
+                pretrained_model_name=self.hf_tokenizer_kwargs.get('pretrained_model') if self.hf_tokenizer_kwargs.get('pretrained_model', None) else 'bert-base-cased',
+                vocab_file=None if (self.hf_tokenizer_kwargs.get('pretrained_model', None) and os.path.exists(self.hf_tokenizer_kwargs.get('pretrained_model'))) else self.vocab_path,
                 mask_token=self.hf_tokenizer_kwargs.get('mask_token', None),
                 bos_token=self.hf_tokenizer_kwargs.get('bos_token', None),
                 eos_token=self.hf_tokenizer_kwargs.get('eos_token', None),

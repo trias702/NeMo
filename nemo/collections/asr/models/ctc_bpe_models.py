@@ -55,7 +55,7 @@ class EncDecCTCModelBPE(EncDecCTCModel, ASRBPEMixin):
             if self.tokenizer_type == "agg":
                 cfg.decoder.vocabulary = ListConfig(vocabulary)
             else:
-                cfg.decoder.vocabulary = ListConfig(list(vocabulary.keys()))
+                cfg.decoder.vocabulary = ListConfig([k.replace('???', '"???"') for k in vocabulary.keys()])
 
         # Override number of classes if placeholder provided
         num_classes = cfg.decoder["num_classes"]

@@ -183,14 +183,14 @@ class AutoTokenizer(TokenizerSpec):
         return tokens
 
     def tokens_to_text(self, tokens):
-        text = self.tokenizer.convert_tokens_to_string(tokens)
+        text = self.tokenizer.convert_tokens_to_string([t for t in tokens if t is not None])
         return text
 
     def token_to_id(self, token):
         return self.tokens_to_ids([token])[0]
 
     def tokens_to_ids(self, tokens):
-        ids = self.tokenizer.convert_tokens_to_ids(tokens)
+        ids = self.tokenizer.convert_tokens_to_ids([t for t in tokens if t is not None])
         return ids
 
     def ids_to_tokens(self, ids):
