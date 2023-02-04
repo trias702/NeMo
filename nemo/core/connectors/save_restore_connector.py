@@ -430,9 +430,9 @@ class SaveRestoreConnector:
             # Get path where the command is executed - the artifacts will be "retrieved" there
             # (original .nemo behavior)
             cwd = os.getcwd()
-            try:
-                # Step into the nemo archive to try and find the file
-                with tempfile.TemporaryDirectory() as archive_dir:
+            with tempfile.TemporaryDirectory() as archive_dir:
+                try:
+                    # Step into the nemo archive to try and find the file
                     self._unpack_nemo_file(path2file=model_metadata.restoration_path, out_folder=archive_dir)
                     os.chdir(archive_dir)
                     for conf_path, artiitem in tarfile_artifacts:
@@ -444,15 +444,15 @@ class SaveRestoreConnector:
                         # no need to hash here as we are in tarfile_artifacts which are already hashed
                         artifact_uniq_name = artifact_base_name
                         shutil.copy2(artifact_base_name, os.path.join(nemo_file_folder, artifact_uniq_name))
-
+    
                         # Update artifacts registry
                         new_artiitem = model_utils.ArtifactItem()
                         new_artiitem.path = "nemo:" + artifact_uniq_name
                         new_artiitem.path_type = model_utils.ArtifactPathType.TAR_PATH
                         model.artifacts[conf_path] = new_artiitem
-            finally:
-                # change back working directory
-                os.chdir(cwd)
+                finally:
+                    # change back working directory
+                    os.chdir(cwd)
 
     def _update_artifact_paths(self, model, path2yaml_file):
         if model.artifacts is not None and len(model.artifacts) > 0:
