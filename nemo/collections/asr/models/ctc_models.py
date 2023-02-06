@@ -630,7 +630,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
         ):
             #self.num_updates += 1
             self.num_updates = self.trainer.global_step + 1
-        #print(f"Num Update [ {self.num_updates} ]  GRAD: ", next(self.encoder.parameters()).requires_grad, flush=True)
+
         if isinstance(batch, DALIOutputs) and batch.has_processed_signal:
             log_probs, encoded_len, predictions = self.forward(
                 processed_signal=signal, processed_signal_length=signal_len
