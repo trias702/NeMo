@@ -210,36 +210,57 @@ class AutoTokenizer(TokenizerSpec):
 
     @property
     def vocab(self):
-        id2vocab = {v: k for k, v in self.tokenizer.vocab.items()}
+        id2vocab = {v: k for k, v in self.tokenizer.get_vocab().items()}
         return [id2vocab[i] for i in range(len(id2vocab))]
 
     @property
     def pad_id(self):
-        return self.tokens_to_ids([getattr(self, 'pad_token')])[0]
+        if getattr(self, 'pad_token'):
+            return self.tokens_to_ids([getattr(self, 'pad_token')])[0]
+        else:
+            return -1
 
     @property
     def bos_id(self):
-        return self.tokens_to_ids([getattr(self, 'bos_token')])[0]
+        if getattr(self, 'bos_token'):
+            return self.tokens_to_ids([getattr(self, 'bos_token')])[0]
+        else:
+            return -1
 
     @property
     def eos_id(self):
-        return self.tokens_to_ids([getattr(self, 'eos_token')])[0]
+        if getattr(self, 'eos_token'):
+            return self.tokens_to_ids([getattr(self, 'eos_token')])[0]
+        else:
+            return -1
 
     @property
     def sep_id(self):
-        return self.tokens_to_ids([getattr(self, 'sep_token')])[0]
+        if getattr(self, 'sep_token'):
+            return self.tokens_to_ids([getattr(self, 'sep_token')])[0]
+        else:
+            return -1
 
     @property
     def cls_id(self):
-        return self.tokens_to_ids([getattr(self, 'cls_token')])[0]
+        if getattr(self, 'cls_token'):
+            return self.tokens_to_ids([getattr(self, 'cls_token')])[0]
+        else:
+            return -1
 
     @property
     def unk_id(self):
-        return self.tokens_to_ids([getattr(self, 'unk_token')])[0]
+        if getattr(self, 'unk_token'):
+            return self.tokens_to_ids([getattr(self, 'unk_token')])[0]
+        else:
+            return -1
 
     @property
     def mask_id(self):
-        return self.tokens_to_ids([getattr(self, 'mask_token')])[0]
+        if getattr(self, 'mask_token'):
+            return self.tokens_to_ids([getattr(self, 'mask_token')])[0]
+        else:
+            return -1
 
     @property
     def name(self):

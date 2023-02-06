@@ -37,6 +37,8 @@ class EncDecCTCModelBPE(EncDecCTCModel, ASRBPEMixin):
 
     def __init__(self, cfg: DictConfig, trainer=None):
         # Convert to Hydra 1.0 compatible DictConfig
+        OmegaConf.register_new_resolver("three_question_marks", lambda: '???', replace=True)
+        
         cfg = model_utils.convert_model_config_to_dict_config(cfg)
         cfg = model_utils.maybe_update_config_version(cfg)
 
@@ -55,7 +57,7 @@ class EncDecCTCModelBPE(EncDecCTCModel, ASRBPEMixin):
             if self.tokenizer_type == "agg":
                 cfg.decoder.vocabulary = ListConfig(vocabulary)
             else:
-                cfg.decoder.vocabulary = ListConfig([k.replace('???', '"???"') for k in vocabulary.keys()])
+                cfg.decoder.vocabulary = ListConfig([k.replace('???', '"${three_question_marks:}"') for k in vocabulary.keys()])
 
         # Override number of classes if placeholder provided
         num_classes = cfg.decoder["num_classes"]

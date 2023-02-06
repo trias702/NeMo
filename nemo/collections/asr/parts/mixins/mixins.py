@@ -70,6 +70,9 @@ class ASRBPEMixin(ABC):
         self.tokenizer_type = self.tokenizer_cfg.pop('type').lower()  # Remove tokenizer_type
 
         self.hf_tokenizer_kwargs = self.tokenizer_cfg.pop("hf_kwargs", {})  # Remove HF tokenizer kwargs
+        if self.tokenizer_dir is None or not os.path.exists(self.tokenizer_dir):
+            if self.hf_tokenizer_kwargs.get('pretrained_model', None) and os.path.exists(self.hf_tokenizer_kwargs.get('pretrained_model')):
+                self.tokenizer_dir = self.hf_tokenizer_kwargs.get('pretrained_model')
 
         # just in case the previous tokenizer was an aggregate
         self._cleanup_aggregate_config_and_artifacts_if_needed()
