@@ -101,8 +101,9 @@ def get_concat_char_dataset(
 
     dataset = ConcatDataset(
         datasets,
-        sampling_technique=config['concat_sampling'],
-        sampling_probabilities=config['concat_probabilities'],
+        sampling_technique=config.get('concat_sampling_technique', 'temperature'),
+        sampling_temperature=config.get('concat_sampling_temperature', 5),
+        sampling_probabilities=config.get('concat_sampling_probabilities', None),
         global_rank=global_rank,
         world_size=world_size,
         shuffle=config['shuffle'],
@@ -174,8 +175,9 @@ def get_concat_bpe_dataset(
 
     dataset = ConcatDataset(
         datasets,
-        sampling_technique=config['concat_sampling'],
-        sampling_probabilities=config['concat_probabilities'],
+        sampling_technique=config.get('concat_sampling_technique', 'temperature'),
+        sampling_temperature=config.get('concat_sampling_temperature', 5),
+        sampling_probabilities=config.get('concat_sampling_probabilities', None),
         global_rank=global_rank,
         world_size=world_size,
         shuffle=config['shuffle'],
@@ -183,20 +185,65 @@ def get_concat_bpe_dataset(
     return dataset
 
 
-def get_shelve_dataset(config: dict, tokenizer: Optional['TokenizerSpec'] = None, augmentor: Optional['AudioAugmentor'] = None) -> Union[audio_to_text.ShelveAudioToCharDataset, audio_to_text.ShelveAudioToBPEDataset]:
+def get_concat_shelve_dataset(
+    config: dict,
+    global_rank: int,
+    world_size: int,
+    tokenizer: Optional['TokenizerSpec'] = None,
+    augmentor: Optional['AudioAugmentor'] = None,
+) -> ConcatDataset:
     """
-    Instantiates a Character Encoding based AudioToCharDataset.
+    Instantiates a ContactDataset based on several Byte Pair Encoding / Word Piece Encoding based AudioToBPEDatasets.
 
     Args:
-        config: Config of the AudioToCharDataset.
+        config: Config of the AudioToBPEDataset.
+        tokenizer: An instance of a TokenizerSpec object.
+        global_rank: Global rank of this device.
+        world_size: Global world size in the training method.
         augmentor: Optional AudioAugmentor object for augmentations on audio data.
 
     Returns:
-        An instance of AudioToCharDataset.
+        An instance of ConcatDataset containing several instances of AudioToBPEDataset.
+    """
+    manifest_filepaths = config['manifest_filepath']
+    datasets = []
+    for manifest_filepath in manifest_filepaths:
+        conf = copy.deepcopy(config)
+        conf['manifest_filepath'] = manifest_filepath[0] if isinstance(manifest_filepath, ListConfig) else manifest_filepath
+        dataset = get_shelve_dataset(config=conf, tokenizer=tokenizer, augmentor=augmentor)
+        datasets.append(dataset)
+
+    dataset = ConcatDataset(
+        datasets,
+        sampling_technique=config.get('concat_sampling_technique', 'temperature'),
+        sampling_temperature=config.get('concat_sampling_temperature', 5),
+        sampling_probabilities=config.get('concat_sampling_probabilities', None),
+        global_rank=global_rank,
+        world_size=world_size,
+        shuffle=config['shuffle'],
+    )
+    return dataset
+
+
+def get_shelve_dataset(
+    config: dict,
+    tokenizer: Optional['TokenizerSpec'] = None,
+    augmentor: Optional['AudioAugmentor'] = None,
+) -> Union[audio_to_text.ShelveAudioToCharDataset, audio_to_text.ShelveAudioToBPEDataset]:
+    """
+    Instantiates either a ShelveAudioToCharDataset or ShelveAudioToBPEDataset
+    as appropriate
+
+    Args:
+        config: Config of the ShelveDataset.
+        augmentor: Optional AudioAugmentor object for augmentations on audio data.
+
+    Returns:
+        An instance of ShelveAudioToCharDataset or ShelveAudioToBPEDataset.
     """
     if tokenizer is None:
         if 'labels' not in config:
-            logging.warning(f"dataset does not have explicitly defined labels")
+            logging.warning("dataset does not have explicitly defined labels")
     
         dataset = audio_to_text.ShelveAudioToCharDataset(
             manifest_filepath=config['manifest_filepath'],
@@ -288,11 +335,15 @@ def get_concat_tarred_dataset(
         An instance of ConcatDataset containing one or more TarredAudioToBPEDatasets or TarredAudioToCharDatasets.
     """
 
+    tarred_audio_filepaths = config['tarred_audio_filepaths']
     manifest_filepaths = config['manifest_filepath']
     datasets = []
-    for manifest_filepath in manifest_filepaths:
+    for dataset_idx, (tarred_audio_filepath, manifest_filepath) in enumerate(
+        zip(tarred_audio_filepaths, manifest_filepaths)
+    ):
         conf = copy.deepcopy(config)
         conf['manifest_filepath'] = manifest_filepath
+        conf['tarred_audio_filepaths'] = tarred_audio_filepath
         dataset = get_tarred_dataset(
             config=conf,
             tokenizer=tokenizer,
@@ -305,8 +356,9 @@ def get_concat_tarred_dataset(
 
     dataset = ConcatDataset(
         datasets,
-        sampling_technique=config['concat_sampling'],
-        sampling_probabilities=config['concat_probabilities'],
+        sampling_technique=config.get('concat_sampling_technique', 'temperature'),
+        sampling_temperature=config.get('concat_sampling_temperature', 5),
+        sampling_probabilities=config.get('concat_sampling_probabilities', None),
         global_rank=global_rank,
         world_size=world_size,
         shuffle=config['shuffle'],

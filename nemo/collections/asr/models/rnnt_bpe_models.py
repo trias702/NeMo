@@ -513,7 +513,19 @@ class EncDecRNNTBPEModel(EncDecRNNTModel, ASRBPEMixin):
                 )
             shuffle = False
         elif config.get('is_shelve', False):
-            dataset = audio_to_text_dataset.get_shelve_dataset(config=config, tokenizer=self.tokenizer, augmentor=augmentor)
+            if 'manifest_filepath' in config and config['manifest_filepath'] is None:
+                logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
+                return None
+            if is_concat:
+                dataset = audio_to_text_dataset.get_concat_shelve_dataset(
+                    config=config,
+                    global_rank=self.global_rank,
+                    world_size=self.world_size,
+                    tokenizer=self.tokenizer,
+                    augmentor=augmentor,
+                )
+            else:
+                dataset = audio_to_text_dataset.get_shelve_dataset(config=config, tokenizer=self.tokenizer, augmentor=augmentor)
         else:
             if 'manifest_filepath' in config and config['manifest_filepath'] is None:
                 logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")

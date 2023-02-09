@@ -98,22 +98,6 @@ class EncDecCTCModelBPE(EncDecCTCModel, ASRBPEMixin):
             augmentor = None
 
         is_concat = config.get('is_concat', False)
-        if is_concat:
-            if 'concat_sampling' in config and config['concat_sampling'] is None:
-                logging.warning(
-                    f"Concat dataset requires `contact_sampling` but it was not provided. Config: {config}"
-                )
-                return None
-
-            if not 'concat_probabilities' in config:
-                logging.warning(
-                    f"Concat dataset requires `contact_probabilities` list but it was not provided. Config: {config}"
-                )
-                return None
-            else:
-                if not isclose(sum(config['concat_probabilities']), 1, abs_tol=1e-6):
-                    logging.warning(f"`contact_probabilities` need to sum to 1. Config: {config}")
-                    return None
 
         shuffle = config['shuffle']
         device = 'gpu' if torch.cuda.is_available() else 'cpu'
@@ -162,7 +146,19 @@ class EncDecCTCModelBPE(EncDecCTCModel, ASRBPEMixin):
                 )
             shuffle = False
         elif config.get('is_shelve', False):
-            dataset = audio_to_text_dataset.get_shelve_dataset(config=config, tokenizer=self.tokenizer, augmentor=augmentor)
+            if 'manifest_filepath' in config and config['manifest_filepath'] is None:
+                logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
+                return None
+            if is_concat:
+                dataset = audio_to_text_dataset.get_concat_shelve_dataset(
+                    config=config,
+                    global_rank=self.global_rank,
+                    world_size=self.world_size,
+                    tokenizer=self.tokenizer,
+                    augmentor=augmentor,
+                )
+            else:
+                dataset = audio_to_text_dataset.get_shelve_dataset(config=config, tokenizer=self.tokenizer, augmentor=augmentor)
         else:
             if 'manifest_filepath' in config and config['manifest_filepath'] is None:
                 logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
@@ -181,8 +177,10 @@ class EncDecCTCModelBPE(EncDecCTCModel, ASRBPEMixin):
                 )
         if hasattr(dataset, 'collate_fn'):
             collate_fn = dataset.collate_fn
-        else:
+        elif hasattr(dataset.datasets[0], 'collate_fn'):
             collate_fn = dataset.datasets[0].collate_fn
+        else:
+            collate_fn = dataset.datasets[0].datasets[0].collate_fn
 
         return torch.utils.data.DataLoader(
             dataset=dataset,

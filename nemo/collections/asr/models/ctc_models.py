@@ -48,7 +48,6 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
         # Get global rank and total number of GPU workers for IterableDataset partitioning, if applicable
         # Global_rank and local_rank is set by LightningModule in Lightning 1.2.0
         self.world_size = 1
-        self.num_updates = 0
         if trainer is not None:
             self.world_size = trainer.world_size
 
@@ -84,11 +83,6 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
             self.spec_augmentation = EncDecCTCModel.from_config_dict(self._cfg.spec_augment)
         else:
             self.spec_augmentation = None
-        
-        if hasattr(self._cfg, 'freeze_finetune_updates') and self._cfg.freeze_finetune_updates is not None:
-            self.freeze_finetune_updates = self._cfg.freeze_finetune_updates
-        else:
-            self.freeze_finetune_updates = 0
 
         # Setup decoding objects
         decoding_cfg = self.cfg.get('decoding', None)
@@ -361,21 +355,6 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
             augmentor = None
 
         is_concat = config.get('is_concat', False)
-        if is_concat:
-            if 'concat_sampling' in config and config['concat_sampling'] is None:
-                logging.warning(
-                    f"Concat dataset requires `contact_sampling` but it was not provided. Config: {config}"
-                )
-                return None
-            if not 'concat_probabilities' in config:
-                logging.warning(
-                    f"Concat dataset requires `contact_probabilities` list but it was not provided. Config: {config}"
-                )
-                return None
-            else:
-                if not isclose(sum(config['concat_probabilities']), 1, abs_tol=1e-6):
-                    logging.warning(f"`contact_probabilities` need to sum to 1. Config: {config}")
-                    return None
 
         # Automatically inject args from model config to dataloader config
         audio_to_text_dataset.inject_dataloader_value_from_model_config(self.cfg, config, key='sample_rate')
@@ -425,7 +404,15 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
                 )
             shuffle = False
         elif config.get('is_shelve', False):
-            dataset = audio_to_text_dataset.get_shelve_dataset(config=config, augmentor=augmentor)
+            if 'manifest_filepath' in config and config['manifest_filepath'] is None:
+                logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
+                return None
+            if is_concat:
+                dataset = audio_to_text_dataset.get_concat_shelve_dataset(
+                    config=config, global_rank=self.global_rank, world_size=self.world_size, augmentor=augmentor
+                )
+            else:
+                dataset = audio_to_text_dataset.get_shelve_dataset(config=config, augmentor=augmentor)
         else:
             if 'manifest_filepath' in config and config['manifest_filepath'] is None:
                 logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
@@ -439,8 +426,10 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
 
         if hasattr(dataset, 'collate_fn'):
             collate_fn = dataset.collate_fn
-        else:
+        elif hasattr(dataset.datasets[0], 'collate_fn'):
             collate_fn = dataset.datasets[0].collate_fn
+        else:
+            collate_fn = dataset.datasets[0].datasets[0].collate_fn
 
         return torch.utils.data.DataLoader(
             dataset=dataset,
@@ -593,20 +582,17 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
                 " with ``processed_signal`` and ``processed_signal_len`` arguments."
             )
 
-        ft = self.freeze_finetune_updates <= self.num_updates
-        with torch.no_grad() if not ft else contextlib.ExitStack():
-            if not has_processed_signal:
-                processed_signal, processed_signal_length = self.preprocessor(
-                    input_signal=input_signal, length=input_signal_length,
-                )
+        if not has_processed_signal:
+            processed_signal, processed_signal_length = self.preprocessor(
+                input_signal=input_signal, length=input_signal_length,
+            )
 
-            if self.spec_augmentation is not None and self.training:
-                processed_signal = self.spec_augmentation(input_spec=processed_signal, length=processed_signal_length)
+        if self.spec_augmentation is not None and self.training:
+            processed_signal = self.spec_augmentation(input_spec=processed_signal, length=processed_signal_length)
 
-            encoder_output = self.encoder(audio_signal=processed_signal, length=processed_signal_length,)
-            encoded = encoder_output[0]
-            encoded_len = encoder_output[1]
-
+        encoder_output = self.encoder(audio_signal=processed_signal, length=processed_signal_length,)
+        encoded = encoder_output[0]
+        encoded_len = encoder_output[1]
         log_probs = self.decoder(encoder_output=encoded)
         greedy_predictions = log_probs.argmax(dim=-1, keepdim=False)
         return (
@@ -621,16 +607,8 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
         if AccessMixin.is_access_enabled():
             AccessMixin.reset_registry(self)
 
+        #print(f"Current step [ {self.trainer.global_step + 1} ] Encoder frozen: ", not next(self.encoder.parameters()).requires_grad, flush=True)
         signal, signal_len, transcript, transcript_len = batch
-        if (
-            self.training
-            and hasattr(self, "num_updates")
-            and hasattr(self, "trainer")
-            and self.trainer is not None
-        ):
-            #self.num_updates += 1
-            self.num_updates = self.trainer.global_step + 1
-
         if isinstance(batch, DALIOutputs) and batch.has_processed_signal:
             log_probs, encoded_len, predictions = self.forward(
                 processed_signal=signal, processed_signal_length=signal_len

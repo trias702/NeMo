@@ -38,7 +38,7 @@ class _TokensWrapper:
 
     @property
     def unk_id(self):
-        if (self.tokenizer is not None) and hasattr(self.tokenizer, 'unk_id'):
+        if (self.tokenizer is not None) and hasattr(self.tokenizer, 'unk_id') and self.tokenizer.unk_id is not None:
             return self.tokenizer.unk_id
 
         if '<unk>' in self.vocabulary:
