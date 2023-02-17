@@ -539,6 +539,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
             "input_signal_length": NeuralType(tuple('B'), LengthsType(), optional=True),
             "processed_signal": NeuralType(('B', 'D', 'T'), SpectrogramType(), optional=True),
             "processed_signal_length": NeuralType(tuple('B'), LengthsType(), optional=True),
+            "transcript": NeuralType(('B', 'T'), LabelsType(), optional=True),
             "sample_id": NeuralType(tuple('B'), LengthsType(), optional=True),
         }
 
@@ -550,9 +551,9 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
             "greedy_predictions": NeuralType(('B', 'T'), LabelsType()),
         }
 
-    @typecheck()
+    #@typecheck()
     def forward(
-        self, input_signal=None, input_signal_length=None, processed_signal=None, processed_signal_length=None
+        self, input_signal=None, input_signal_length=None, processed_signal=None, processed_signal_length=None, transcript=None
     ):
         """
         Forward pass of the model.
@@ -593,8 +594,16 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
         encoder_output = self.encoder(audio_signal=processed_signal, length=processed_signal_length,)
         encoded = encoder_output[0]
         encoded_len = encoder_output[1]
-        log_probs = self.decoder(encoder_output=encoded)
-        greedy_predictions = log_probs.argmax(dim=-1, keepdim=False)
+        
+        if self.decoder.__class__.__name__ == 'ConvASRSampledDecoder':
+            log_probs = self.decoder(encoder_output=encoded, transcript=transcript)
+            if isinstance(log_probs, tuple):
+                greedy_predictions = log_probs[0].argmax(dim=-1, keepdim=False)
+            else:
+                greedy_predictions = log_probs.argmax(dim=-1, keepdim=False)
+        else:
+            log_probs = self.decoder(encoder_output=encoded)
+            greedy_predictions = log_probs.argmax(dim=-1, keepdim=False)
         return (
             log_probs,
             encoded_len,
@@ -611,14 +620,25 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
         signal, signal_len, transcript, transcript_len = batch
         if isinstance(batch, DALIOutputs) and batch.has_processed_signal:
             log_probs, encoded_len, predictions = self.forward(
-                processed_signal=signal, processed_signal_length=signal_len
+                processed_signal=signal, processed_signal_length=signal_len, transcript=transcript
             )
         else:
-            log_probs, encoded_len, predictions = self.forward(input_signal=signal, input_signal_length=signal_len)
+            log_probs, encoded_len, predictions = self.forward(input_signal=signal, input_signal_length=signal_len, transcript=transcript)
 
-        loss_value = self.loss(
-            log_probs=log_probs, targets=transcript, input_lengths=encoded_len, target_lengths=transcript_len
-        )
+        if self.decoder.__class__.__name__ == 'ConvASRSampledDecoder' and isinstance(log_probs, tuple):
+            log_probs, transcript = log_probs
+            
+            #cached_blank_id = self.loss.blank
+            self.loss.blank = 0
+            self.loss._blank = 0
+            
+            loss_value = self.loss(
+                log_probs=log_probs, targets=transcript, input_lengths=encoded_len, target_lengths=transcript_len
+            )
+        else:
+            loss_value = self.loss(
+                log_probs=log_probs, targets=transcript, input_lengths=encoded_len, target_lengths=transcript_len
+            )
 
         # Add auxiliary losses, if registered
         loss_value = self.add_auxiliary_losses(loss_value)

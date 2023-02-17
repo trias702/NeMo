@@ -28,6 +28,7 @@ from nemo.collections.asr.modules.conformer_decoder import ConformerDecoder
 from nemo.collections.asr.modules.conformer_encoder import ConformerEncoder, ConformerEncoderAdapter
 from nemo.collections.asr.modules.conv_asr import (
     ConvASRDecoder,
+    ConvASRSampledDecoder,
     ConvASRDecoderClassification,
     ConvASRDecoderReconstruction,
     ConvASREncoder,
