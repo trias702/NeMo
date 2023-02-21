@@ -100,13 +100,11 @@ class FlashLightKenLMBeamSearchDecoder(NeuralModule):
 
         try:
             from flashlight.lib.text.dictionary import create_word_dict, load_words
-            from flashlight.lib.sequence.criterion import get_data_ptr_as_bytes
             from flashlight.lib.text.decoder import (
                 CriterionType,
                 LexiconDecoderOptions,
                 KenLM,
                 LM,
-                LMState,
                 SmearingMode,
                 Trie,
                 LexiconDecoder,
