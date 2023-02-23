@@ -582,7 +582,7 @@ class _AudioTextShelveDataset(Dataset):
         
         self.parser = parser
         
-        self.db = shelve.open(f'{os.path.join(manifest_filepath, "db")}', 'r')
+        self.db = shelve.open(os.path.join(manifest_filepath, 'db'), 'r')
         self.keys = list(self.db.keys())
         
         self.eos_id = eos_id
