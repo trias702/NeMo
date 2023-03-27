@@ -485,7 +485,6 @@ class BeamCTCInfer(AbstractBeamCTCInfer):
                 word_score=self.beam_beta,
                 unk_weight=self.flashlight_cfg.unk_weight,
                 sil_weight=self.flashlight_cfg.sil_weight,
-                unit_lm=self.flashlight_cfg.unit_lm,
             )
 
         x = x.to('cpu')
@@ -551,7 +550,6 @@ class FlashlightConfig:
     beam_threshold: float = 20.0
     unk_weight: float = -math.inf
     sil_weight: float = 0.0
-    unit_lm: bool = False
 
 
 @dataclass

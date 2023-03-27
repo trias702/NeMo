@@ -93,7 +93,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
             with open_dict(self.cfg):
                 self.cfg.decoding = decoding_cfg
 
-        self.decoding = CTCDecoding(self.cfg.decoding, vocabulary=self.decoder.vocabulary)
+        self.decoding = CTCDecoding(self.cfg.decoding, vocabulary=OmegaConf.to_container(self.decoder.vocabulary))
 
         # Setup metric with decoding strategy
         self._wer = WER(
@@ -209,6 +209,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
                     logits, logits_len, greedy_predictions = self.forward(
                         input_signal=test_batch[0].to(device), input_signal_length=test_batch[1].to(device)
                     )
+                    
                     if logprobs:
                         # dump log probs per file
                         for idx in range(logits.shape[0]):
@@ -218,6 +219,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
                         current_hypotheses, all_hyp = self.decoding.ctc_decoder_predictions_tensor(
                             logits, decoder_lengths=logits_len, return_hypotheses=return_hypotheses,
                         )
+                        logits = logits.cpu()
 
                         if return_hypotheses:
                             # dump log probs per file
@@ -291,7 +293,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
             decoding_cls = OmegaConf.create(OmegaConf.to_container(decoding_cls))
             decoding_cfg = OmegaConf.merge(decoding_cls, decoding_cfg)
 
-            self.decoding = CTCDecoding(decoding_cfg=decoding_cfg, vocabulary=self.decoder.vocabulary)
+            self.decoding = CTCDecoding(decoding_cfg=decoding_cfg, vocabulary=OmegaConf.to_container(self.decoder.vocabulary))
 
             self._wer = WER(
                 decoding=self.decoding,
@@ -333,7 +335,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
         decoding_cls = OmegaConf.create(OmegaConf.to_container(decoding_cls))
         decoding_cfg = OmegaConf.merge(decoding_cls, decoding_cfg)
 
-        self.decoding = CTCDecoding(decoding_cfg=decoding_cfg, vocabulary=self.decoder.vocabulary)
+        self.decoding = CTCDecoding(decoding_cfg=decoding_cfg, vocabulary=OmegaConf.to_container(self.decoder.vocabulary))
 
         self._wer = WER(
             decoding=self.decoding,
@@ -756,7 +758,7 @@ class EncDecCTCModel(ASRModel, ExportableEncDecModel, ASRModuleMixin):
         dl_config = {
             'manifest_filepath': manifest_filepath,
             'sample_rate': self.preprocessor._sample_rate,
-            'labels': self.decoder.vocabulary,
+            'labels': OmegaConf.to_container(self.decoder.vocabulary),
             'batch_size': batch_size,
             'trim_silence': False,
             'shuffle': False,
