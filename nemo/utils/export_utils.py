@@ -108,11 +108,12 @@ def parse_input_example(input_example):
 def to_onnxrt_input(ort_input_names, input_names, input_dict, input_list):
     odict = {}
     for k in reversed(input_names):
+        val = None
         if k in input_dict:
             val = input_dict[k].cpu().numpy()
-        else:
+        elif len(input_list) > 0:
             val = input_list.pop().cpu().numpy()
-        if k in ort_input_names:
+        if k in ort_input_names and val is not None:
             odict[k] = val
     return odict
 
@@ -207,10 +208,10 @@ def run_ort_and_compare(sess, ort_input, output_example, check_tolerance=0.01):
 apex_available = True
 
 try:
-    from apex.normalization.fused_layer_norm import FusedLayerNorm, MixedFusedLayerNorm
     from apex.contrib.layer_norm.layer_norm import FastLayerNorm
-    from apex.transformer.tensor_parallel.layers import RowParallelLinear, ColumnParallelLinear
+    from apex.normalization.fused_layer_norm import FusedLayerNorm, MixedFusedLayerNorm
     from apex.transformer.functional.fused_softmax import FusedScaleMaskSoftmax
+    from apex.transformer.tensor_parallel.layers import ColumnParallelLinear, RowParallelLinear
 
     def replace_FusedLayerNorm(n: nn.Module) -> Optional[nn.LayerNorm]:
         """

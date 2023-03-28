@@ -31,9 +31,9 @@ class _TokensWrapper:
 
         if tokenizer is None:
             self.reverse_map = {self.vocabulary[i]: i for i in range(len(self.vocabulary))}
-        
+
         self.vocab_len = len(self.vocabulary)
-        
+
         if (self.tokenizer is not None) and hasattr(self.tokenizer, 'unk_id') and self.tokenizer.unk_id is not None:
             self.unknown_id = self.tokenizer.unk_id
         elif ' ' in self.vocabulary:
@@ -103,16 +103,16 @@ class FlashLightKenLMBeamSearchDecoder(NeuralModule):
     ):
 
         try:
-            from flashlight.lib.text.dictionary import create_word_dict, load_words
             from flashlight.lib.text.decoder import (
-                CriterionType,
-                LexiconDecoderOptions,
-                KenLM,
                 LM,
+                CriterionType,
+                KenLM,
+                LexiconDecoder,
+                LexiconDecoderOptions,
                 SmearingMode,
                 Trie,
-                LexiconDecoder,
             )
+            from flashlight.lib.text.dictionary import create_word_dict, load_words
         except ModuleNotFoundError:
             raise ModuleNotFoundError(
                 "FlashLightKenLMBeamSearchDecoder requires the installation of flashlight python bindings "

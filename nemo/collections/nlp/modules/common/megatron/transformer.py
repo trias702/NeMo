@@ -42,9 +42,9 @@ from nemo.core import adapter_mixins
 from nemo.utils import logging
 
 try:
+    from apex.normalization import MixedFusedRMSNorm
     from apex.transformer import parallel_state, tensor_parallel
     from apex.transformer.enums import AttnMaskType, AttnType, ModelType
-    from apex.normalization import MixedFusedRMSNorm
 
     HAVE_APEX = True
 
@@ -56,8 +56,8 @@ except (ImportError, ModuleNotFoundError):
     ModelType = AttnMaskType = AttnType = LayerType = ApexGuardDefaults()
 
 try:
-    from transformer_engine.pytorch import TransformerLayer, fp8_autocast
     from transformer_engine.common import recipe
+    from transformer_engine.pytorch import TransformerLayer, fp8_autocast
     from transformer_engine.pytorch.distributed import checkpoint as te_checkpoint
 
     HAVE_TE = True
@@ -145,6 +145,8 @@ class ParallelTransformerLayer_(MegatronModule, adapter_mixins.AdapterModuleMixi
         chunk_size=64,
         normalization='layernorm',
         transformer_block_type='pre_ln',
+        position_embedding_type='learned_absolute',
+        multi_query_attention=False,
         headscale=False,
         activations_checkpoint_granularity=None,
         sequence_parallel=False,
@@ -165,6 +167,7 @@ class ParallelTransformerLayer_(MegatronModule, adapter_mixins.AdapterModuleMixi
         self.layer_type = layer_type
         self.bias = bias
         self.transformer_block_type = transformer_block_type
+        self.position_embedding_type = position_embedding_type
         self.set_accepted_adapter_types([LinearAdapterConfig._target_, ParallelLinearAdapterConfig._target_])
 
         if not bias and bias_dropout_add_fusion:
@@ -214,11 +217,13 @@ class ParallelTransformerLayer_(MegatronModule, adapter_mixins.AdapterModuleMixi
                 use_cpu_initialization=use_cpu_initialization,
                 masked_softmax_fusion=masked_softmax_fusion,
                 attention_dropout=attention_dropout,
+                multi_query_attention=multi_query_attention,
                 layer_type=layer_type,
                 megatron_legacy=megatron_legacy,
                 bias=bias,
                 headscale=headscale,
                 activations_checkpoint_granularity=activations_checkpoint_granularity,
+                position_embedding_type=position_embedding_type,
                 sequence_parallel=sequence_parallel,
                 gradient_accumulation_fusion=gradient_accumulation_fusion,
                 normalize_attention_scores=normalize_attention_scores,
@@ -277,6 +282,7 @@ class ParallelTransformerLayer_(MegatronModule, adapter_mixins.AdapterModuleMixi
                 precision=precision,
                 apply_query_key_layer_scaling=apply_query_key_layer_scaling,
                 kv_channels=kv_channels,
+                multi_query_attention=multi_query_attention,
                 use_cpu_initialization=use_cpu_initialization,
                 masked_softmax_fusion=masked_softmax_fusion,
                 attention_dropout=attention_dropout,
@@ -496,19 +502,19 @@ class ParallelTransformerLayer_(MegatronModule, adapter_mixins.AdapterModuleMixi
             if attention_bias is not None:
                 attention_bias = attention_bias.expand_as(residual)
 
-            layernorm_input = bias_dropout_add_func(attention_output, attention_bias, residual, self.hidden_dropout)
-            # print(f"Layer: {self.layer_number} Attention checksum {layernorm_input.sum()}")
-
             if self.is_adapter_available():
                 adapter_1 = self.get_adapter_module(AdapterName.PRE_ATTN_ADAPTER)
                 if adapter_1:
                     strategy = adapter_1.adapter_strategy
-                    layernorm_input = self.forward_single_enabled_adapter_(
-                        layernorm_input,
+                    attention_output = self.forward_single_enabled_adapter_(
+                        attention_output,
                         adapter_1,
                         adapter_name=AdapterName.PRE_ATTN_ADAPTER,
                         adapter_strategy=strategy,
                     )
+
+            layernorm_input = bias_dropout_add_func(attention_output, attention_bias, residual, self.hidden_dropout)
+            # print(f"Layer: {self.layer_number} Attention checksum {layernorm_input.sum()}")
 
             # Post-LN normalization after residual
             if self.transformer_block_type == 'post_ln':
@@ -576,7 +582,15 @@ class ParallelTransformerLayer_(MegatronModule, adapter_mixins.AdapterModuleMixi
                 layernorm_input = normalization_output
         # MLP.
         mlp_output, mlp_bias = self.mlp(normalization_output)
-
+        if (
+            self.is_adapter_available()
+        ):  # TODO: (@adithyre) was able to move adapter_2 back to the end of the transformer after ptl 1.7 update.
+            adapter_2 = self.get_adapter_module(AdapterName.POST_ATTN_ADAPTER)
+            if adapter_2:
+                strategy = adapter_2.adapter_strategy
+                mlp_output = self.forward_single_enabled_adapter_(
+                    mlp_output, adapter_2, adapter_name=AdapterName.POST_ATTN_ADAPTER, adapter_strategy=strategy
+                )
         residual = layernorm_input
 
         bias_dropout_add_func = self._get_bias_droput_add_func(
@@ -591,16 +605,6 @@ class ParallelTransformerLayer_(MegatronModule, adapter_mixins.AdapterModuleMixi
 
         if get_key_value:
             output = [output, presents]
-
-        if (
-            self.is_adapter_available()
-        ):  # TODO: (@adithyre) was able to move adapter_2 back to the end of the transformer after ptl 1.7 update.
-            adapter_2 = self.get_adapter_module(AdapterName.POST_ATTN_ADAPTER)
-            if adapter_2:
-                strategy = adapter_2.adapter_strategy
-                output = self.forward_single_enabled_adapter_(
-                    output, adapter_2, adapter_name=AdapterName.POST_ATTN_ADAPTER, adapter_strategy=strategy
-                )
 
         return output
 
@@ -637,6 +641,8 @@ class ParallelTransformerLayer(ParallelTransformerLayer_):
         chunk_size=64,
         normalization='layernorm',
         transformer_block_type='pre_ln',
+        position_embedding_type='learned_absolute',
+        multi_query_attention=False,
         headscale=False,
         activations_checkpoint_granularity=None,
         sequence_parallel=False,
@@ -676,7 +682,9 @@ class ParallelTransformerLayer(ParallelTransformerLayer_):
             chunk_size=chunk_size,
             normalization=normalization,
             transformer_block_type=transformer_block_type,
+            position_embedding_type=position_embedding_type,
             headscale=headscale,
+            multi_query_attention=multi_query_attention,
             activations_checkpoint_granularity=activations_checkpoint_granularity,
             sequence_parallel=sequence_parallel,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
@@ -772,6 +780,7 @@ class AutocastTransformerLayer(TransformerLayer):
         drop_path_rate: float = 0,
         use_emha: bool = False,
         autocast_dtype: Any = 16,
+        zero_centered_gamma: bool = False,
     ) -> None:
         super().__init__(
             hidden_size=hidden_size,
@@ -801,6 +810,7 @@ class AutocastTransformerLayer(TransformerLayer):
             drop_path_rate=drop_path_rate,
             set_parallel_mode=tp_size > 1,
             fuse_qkv_params=True,
+            zero_centered_gamma=zero_centered_gamma,
         )
         # use_emha=use_emha,
 
@@ -885,6 +895,7 @@ class ParallelTransformer(MegatronModule):
         chunk_size=64,
         normalization='layernorm',
         transformer_block_type='pre_ln',
+        position_embedding_type='learned_absolute',
         headscale=False,
         layer_number_offset=0,  # this is use only for attention norm_factor scaling
         activations_checkpoint_granularity=None,
@@ -901,6 +912,7 @@ class ParallelTransformer(MegatronModule):
         reduce_amax=True,
         use_emha=False,
         normalize_attention_scores=True,
+        multi_query_attention=False,
         num_moe_experts=1,
         moe_frequency=1,
         moe_dropout=0.0,
@@ -922,6 +934,8 @@ class ParallelTransformer(MegatronModule):
         self.normalization = normalization
         self.transformer_block_type = transformer_block_type
         self.layer_type = layer_type
+        self.position_embedding_type = position_embedding_type
+        self.multi_query_attention = multi_query_attention
 
         self.activations_checkpoint_method = activations_checkpoint_method
         self.activations_checkpoint_num_layers = activations_checkpoint_num_layers
@@ -1036,6 +1050,7 @@ class ParallelTransformer(MegatronModule):
                     apply_residual_connection_post_layernorm=False,
                     autocast_dtype=precision,
                     use_emha=use_emha,
+                    zero_centered_gamma=normalization == 'layernorm1p',
                 )
             else:
                 return ParallelTransformerLayer(
@@ -1061,6 +1076,7 @@ class ParallelTransformer(MegatronModule):
                     masked_softmax_fusion=masked_softmax_fusion,
                     gradient_accumulation_fusion=gradient_accumulation_fusion,
                     persist_layer_norm=persist_layer_norm,
+                    position_embedding_type=position_embedding_type,
                     openai_gelu=openai_gelu,
                     onnx_safe=onnx_safe,
                     activation=activation,
@@ -1403,8 +1419,8 @@ class ParallelTransformer(MegatronModule):
         with rng_context:
             # fp8_autocast will not do anything if TE or FP8 isn't used
             fp8_group = None
-            if parallel_state.model_parallel_is_initialized():
-                fp8_group = parallel_state.get_data_parallel_group()
+            if self.fp8 and parallel_state.model_parallel_is_initialized():
+                fp8_group = parallel_state.get_amax_reduction_group()
 
             if HAVE_TE:
                 # if TE is installed but fp8 is not available then this will do nothing

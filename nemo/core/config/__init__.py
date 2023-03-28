@@ -43,7 +43,6 @@ from nemo.core.config.schedulers import (
     WarmupAnnealingParams,
     WarmupHoldSchedulerParams,
     WarmupSchedulerParams,
-    TriStageAnnealingParams,
     get_scheduler_config,
     register_scheduler_params,
 )

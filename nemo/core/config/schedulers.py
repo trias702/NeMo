@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -164,22 +164,6 @@ class PolynomialHoldDecayAnnealingParams(WarmupSchedulerParams):
     cycle: bool = False
 
 
-@dataclass
-class TriStageAnnealingParams(SchedulerParams):
-    """
-    TriStage Annealing parameter config
-    It is not derived from Config as it is not a NeMo object (and in particular it doesn't need a name).
-    """
-
-    max_steps: int = 0
-    warmup_steps: Optional[float] = None
-    hold_steps: Optional[float] = None
-    decay_steps: Optional[float] = None
-    phase_ratio: Optional[Tuple[float, float, float]] = None
-    init_lr_scale: float = 0.01
-    final_lr_scale: float = 0.01
-
-
 """
 Pytorch Optimizers
 """
@@ -300,6 +284,5 @@ AVAILABLE_SCHEDULER_PARAMS = {
     'WarmupAnnealingParams': WarmupAnnealingParams,
     'PolynomialDecayAnnealingParams': PolynomialDecayAnnealingParams,
     'PolynomialHoldDecayAnnealingParams': PolynomialHoldDecayAnnealingParams,
-    'TriStageAnnealingParams': TriStageAnnealingParams,
     'ReduceLROnPlateauParams': ReduceLROnPlateauParams,
 }
