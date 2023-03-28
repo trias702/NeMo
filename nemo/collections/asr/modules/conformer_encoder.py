@@ -569,7 +569,7 @@ class ConformerEncoder(NeuralModule, StreamingEncoder, Exportable, AccessMixin):
 
         for lth, (drop_prob, layer) in enumerate(zip(self.layer_drop_probs, self.layers)):
             original_signal = audio_signal
-            audio_signal = layer(
+            audio_signal, _ = layer(
                 x=audio_signal,
                 att_mask=att_mask,
                 pos_emb=pos_emb,
