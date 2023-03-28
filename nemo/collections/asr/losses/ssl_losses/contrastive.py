@@ -136,7 +136,10 @@ class ContrastiveLoss(Loss):
         # y - T'xBxC or T'xC
 
         high = y.shape[0]
-        neg_idxs = torch.multinomial(torch.ones((num, high), device=y.device), self.num_negatives)
+        if self.num_negatives > high:
+            neg_idxs = torch.multinomial(torch.ones((num, high), device=y.device), self.num_negatives, replacement=True)
+        else:
+            neg_idxs = torch.multinomial(torch.ones((num, high), device=y.device), self.num_negatives)
 
         negs = y[neg_idxs.view(-1)]
         negs = negs.view((num, self.num_negatives) + y.shape[1:])
