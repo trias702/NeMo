@@ -376,7 +376,7 @@ def read_manifest(manifest: Union[Path, str]) -> List[dict]:
 
     data = []
     try:
-        f = open(manifest.get(), 'r', encoding='utf-8')
+        f = open(manifest.get(), 'r', encoding='utf_8')
     except:
         raise Exception(f"Manifest file could not be opened: {manifest}")
     for line in f:
@@ -395,7 +395,7 @@ def write_manifest(output_path: Union[Path, str], target_manifest: List[dict], e
         target_manifest (list): List of manifest file entries
         ensure_ascii (bool): default is True, meaning the output is guaranteed to have all incoming non-ASCII characters escaped. If ensure_ascii is false, these characters will be output as-is.
     """
-    with open(output_path, "w", encoding="utf-8") as outfile:
+    with open(output_path, "w", encoding="utf_8", newline="\n") as outfile:
         for tgt in target_manifest:
             json.dump(tgt, outfile, ensure_ascii=ensure_ascii)
             outfile.write('\n')
