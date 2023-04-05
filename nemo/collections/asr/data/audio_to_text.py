@@ -735,7 +735,6 @@ class ShelveAudioToCharDataset(_AudioTextShelveDataset):
             eos_id=eos_id,
             pad_id=pad_id,
             return_sample_id=return_sample_id,
-            channel_selector=channel_selector,
         )
 
 
