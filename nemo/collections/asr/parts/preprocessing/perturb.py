@@ -583,6 +583,160 @@ class NoisePerturbation(Perturbation):
             data._samples[noise_idx : noise_idx + noise_samples.shape[0]] += noise_samples
 
 
+class NoiseNormPerturbation(Perturbation):
+    """
+    Perturbation that adds noise to input audio, with normalisation to specific decibel level.
+    Also tiles shorter noise samples up to their corresponding clean audio length.
+
+    Args:
+        manifest_path (str): Manifest file with paths to noise files
+        min_snr_db (float): Minimum SNR of audio after noise is added
+        max_snr_db (float): Maximum SNR of audio after noise is added
+        snr_samples (list): A discrete list of SNRs DBs to sample from when mixing, will be used instead of [min_snr_db,max_snr_db]
+        norm_to_db (float): Will normalise clean, noise, and mixed samples to this DB
+        audio_tar_filepaths (list) : Tar files, if noise audio files are tarred
+        shuffle_n (int): Shuffle parameter for shuffling buffered files from the tar files
+        orig_sr (int): Original sampling rate of the noise files
+        rng (int): Random seed. Default is None
+    """
+
+    def __init__(
+        self,
+        manifest_path=None,
+        min_snr_db=10,
+        max_snr_db=50,
+        snr_samples=None,
+        norm_to_db=None,
+        rng=None,
+        audio_tar_filepaths=None,
+        shuffle_n=128,
+        orig_sr=16000,
+    ):
+        self._manifest = collections.ASRAudioText(manifest_path, parser=parsers.make_parser([]), index_by_file_id=True)
+        self._audiodataset = None
+        self._tarred_audio = False
+        self._orig_sr = orig_sr
+        self._data_iterator = None
+        
+        random.seed(rng) if rng else None
+        self._rng = rng
+
+        if audio_tar_filepaths:
+            self._tarred_audio = True
+            self._audiodataset = AugmentationDataset(manifest_path, audio_tar_filepaths, shuffle_n)
+            self._data_iterator = iter(self._audiodataset)
+
+        self._min_snr_db = min_snr_db
+        self._max_snr_db = max_snr_db
+        self._norm_to_db = norm_to_db
+        self._snr_samples = snr_samples if isinstance(snr_samples, list) and len(snr_samples) > 0 else None
+
+    @property
+    def orig_sr(self):
+        return self._orig_sr
+
+    def get_one_noise_sample(self, target_sr):
+        return read_one_audiosegment(
+            self._manifest, target_sr, None, tarred_audio=self._tarred_audio, audio_dataset=self._data_iterator
+        )
+
+    def perturb(self, data, ref_mic=0):
+        """
+        Args:
+            data (AudioSegment): audio data
+            ref_mic (int): reference mic index for scaling multi-channel audios
+        """
+        noise = read_one_audiosegment(
+            self._manifest,
+            data.sample_rate,
+            None,
+            tarred_audio=self._tarred_audio,
+            audio_dataset=self._data_iterator,
+        )
+        self.perturb_with_input_noise(data, noise, ref_mic=ref_mic, norm_to_db=self._norm_to_db)
+    
+    def snr_mixer(self, clean, noise, snr, norm_to_db=-25.0):
+        rmsclean = (clean**2).mean(axis=0)**0.5
+        scalarclean = 10 ** (norm_to_db / 20) / rmsclean
+        clean = clean * scalarclean
+        rmsclean = (clean**2).mean(axis=0)**0.5
+    
+        rmsnoise = (noise**2).mean(axis=0)**0.5
+        scalarnoise = 10 ** (norm_to_db / 20) /rmsnoise
+        noise = noise * scalarnoise
+        rmsnoise = (noise**2).mean(axis=0)**0.5
+        
+        # Set the noise level for a given SNR
+        noisescalar = np.sqrt(rmsclean / (10**(snr/20)) / rmsnoise)
+        noisenewlevel = noise * noisescalar
+        noisyspeech = clean + noisenewlevel
+        
+        return clean, noisenewlevel, noisyspeech
+
+    def norm_audio_to_db(self, x, norm_to_db):
+        rms = (x ** 2).mean(axis=0) ** 0.5
+        scalar = 10 ** (norm_to_db / 20.0) / (rms)
+        return x * scalar
+    
+    def concatenate_noise_sample(self, clean, noise, fs, silence_length=0.5):
+        while len(noise) < len(clean):
+            if noise.ndim > 1:
+                zeros = np.zeros((int(fs*silence_length), noise.shape[-1]))
+            else:
+                zeros = np.zeros((int(fs*silence_length),))
+            noiseconcat = np.append(noise, zeros, axis=0)
+            noise = np.append(noiseconcat, noise, axis=0)
+    
+        return noise
+
+    def perturb_with_input_noise(self, data, noise, data_rms=None, ref_mic=0, norm_to_db=-25.0):
+        """
+        Args:
+            data (AudioSegment): audio data
+            noise (AudioSegment): noise data
+            data_rms (Union[float, List[float]): rms_db for data input
+            ref_mic (int): reference mic index for scaling multi-channel audios
+            norm_to_db (float): will normalise all audio to this DB
+        """
+        if data.num_channels != noise.num_channels:
+            raise ValueError(
+                f"Found mismatched channels for data ({data.num_channels}) and noise ({noise.num_channels})."
+            )
+
+        if not (0 <= ref_mic < data.num_channels):
+            raise ValueError(
+                f" reference mic ID must be an integer in [0, {data.num_channels}), got {ref_mic} instead."
+            )
+
+        if self._snr_samples:
+            snr_db = random.sample(self._snr_samples, 1)[0]
+        else:
+            snr_db = random.uniform(self._min_snr_db, self._max_snr_db)
+        if data_rms is None:
+            data_rms = data.rms_db
+
+        if norm_to_db is None:
+            norm_to_db = data_rms
+        
+        data_norm = self.norm_audio_to_db(data._samples, norm_to_db)
+        noise_norm = self.norm_audio_to_db(noise._samples, norm_to_db)
+        
+        if len(noise_norm) < len(data_norm):
+            '''
+            reps = int(np.ceil(len(data_norm) / len(noise_norm)))
+            if noise.num_channels > 1:
+                noise_norm = np.tile(noise_norm, (reps, 1))
+            else:
+                noise_norm = np.tile(noise_norm, reps)
+            '''
+            noise_norm = self.concatenate_noise_sample(data_norm, noise_norm, data.sample_rate)
+        noise_norm = noise_norm[0:len(data_norm)]
+        
+        _, _, noisy_snr = self.snr_mixer(clean=data_norm, noise=noise_norm, snr=snr_db, norm_to_db=norm_to_db)
+        
+        data._samples = noisy_snr
+
+
 class WhiteNoisePerturbation(Perturbation):
     """
     Perturbation that adds white noise to an audio file in the training dataset.
@@ -840,6 +994,7 @@ perturbation_types = {
     "impulse": ImpulsePerturbation,
     "shift": ShiftPerturbation,
     "noise": NoisePerturbation,
+    "noise_norm": NoiseNormPerturbation,
     "white_noise": WhiteNoisePerturbation,
     "rir_noise_aug": RirAndNoisePerturbation,
     "transcode_aug": TranscodePerturbation,
