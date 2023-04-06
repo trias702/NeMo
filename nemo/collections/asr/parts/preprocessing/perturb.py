@@ -44,7 +44,8 @@ import librosa
 import numpy as np
 import soundfile as sf
 from scipy import signal
-from torch.utils.data import IterableDataset
+#from torch.utils.data import IterableDataset
+from nemo.core.classes import IterableDataset
 
 from nemo.collections.asr.parts.preprocessing.segment import AudioSegment
 from nemo.collections.common.parts.preprocessing import collections, parsers
@@ -71,16 +72,16 @@ except (ImportError, ModuleNotFoundError):
 
 def read_one_audiosegment(manifest, target_sr, rng=None, tarred_audio=False, audio_dataset=None):
 
-    random.seed(rng) if rng else None
+    #random.seed(rng) if rng else None
 
     if tarred_audio:
         if audio_dataset is None:
             raise TypeError("Expected augmentation dataset but got None")
-        audio_file, file_id = next(audio_dataset)
-        manifest_idx = manifest.mapping[file_id]
-        if isinstance(manifest_idx, list):
-            manifest_idx = manifest_idx[0]
-        manifest_entry = manifest[manifest_idx]
+        audio_file, file_id, manifest_entry = next(audio_dataset)
+        #manifest_idx = manifest.mapping[file_id]
+        #if isinstance(manifest_idx, list):
+        #    manifest_idx = manifest_idx[0]
+        #manifest_entry = manifest[manifest_idx]
 
         offset = 0 if manifest_entry.offset is None else manifest_entry.offset
         duration = 0 if manifest_entry.duration is None else manifest_entry.duration
@@ -614,6 +615,8 @@ class NoiseNormPerturbation(Perturbation):
         shuffle_n=128,
         orig_sr=16000,
     ):
+        from nemo.collections.asr.data.audio_to_text import RandomizedChainDataset
+        
         self._manifest = collections.ASRAudioText(manifest_path, parser=parsers.make_parser([]), index_by_file_id=True)
         self._audiodataset = None
         self._tarred_audio = False
@@ -625,7 +628,17 @@ class NoiseNormPerturbation(Perturbation):
 
         if audio_tar_filepaths:
             self._tarred_audio = True
-            self._audiodataset = AugmentationDataset(manifest_path, audio_tar_filepaths, shuffle_n)
+            #self._audiodataset = AugmentationDataset(manifest_path, audio_tar_filepaths, shuffle_n)
+            #self._data_iterator = iter(self._audiodataset)
+            if isinstance(manifest_path, str):
+                manifest_path = [manifest_path]
+            if isinstance(audio_tar_filepaths, str):
+                audio_tar_filepaths = [audio_tar_filepaths]
+            datasets = []
+            for tarred_audio_filepath, manifest_filepath in zip(audio_tar_filepaths, manifest_path):
+                dataset = AugmentationDataset(manifest_filepath, tarred_audio_filepath, shuffle_n)
+                datasets.append(dataset)
+            self._audiodataset = RandomizedChainDataset(datasets, rnd_seed=rng if rng else 123)
             self._data_iterator = iter(self._audiodataset)
 
         self._min_snr_db = min_snr_db
@@ -636,11 +649,6 @@ class NoiseNormPerturbation(Perturbation):
     @property
     def orig_sr(self):
         return self._orig_sr
-
-    def get_one_noise_sample(self, target_sr):
-        return read_one_audiosegment(
-            self._manifest, target_sr, None, tarred_audio=self._tarred_audio, audio_dataset=self._data_iterator
-        )
 
     def perturb(self, data, ref_mic=0):
         """
@@ -1156,6 +1164,7 @@ def process_augmentations(augmenter) -> Optional[AudioAugmentor]:
                 raise ValueError("`prob` must be a float value between 0 and 1.")
 
             try:
+                #'rank' in NoiseNormPerturbation.__dict__['__init__'].__code__.co_varnames
                 augmentation = perturbation_types[augment_name](**augment_kwargs)
                 augmentations.append([prob, augmentation])
             except KeyError:
@@ -1168,26 +1177,24 @@ def process_augmentations(augmenter) -> Optional[AudioAugmentor]:
 class AugmentationDataset(IterableDataset):
     """
         A class that loads tarred audio files and cycles over the files in the dataset.
-
         Accepts a single comma-separated JSON manifest file (in the same style as for the AudioToCharDataset/AudioToBPEDataset),
         as well as the path(s) to the tarball(s) containing the wav files. Each line of the manifest should
         contain the information for one audio file, including at least the transcript and name of the audio
         file within the tarball.
-
         Valid formats for the audio_tar_filepaths argument include:
         (1) a single string that can be brace-expanded, e.g. 'path/to/audio.tar' or 'path/to/audio_{1..100}.tar.gz', or
         (2) a list of file paths that will not be brace-expanded, e.g. ['audio_1.tar', 'audio_2.tar', ...].
-
         Note: For brace expansion in (1), there may be cases where `{x..y}` syntax cannot be used due to shell interference.
         This occurs most commonly inside SLURM scripts. Therefore we provide a few equivalent replacements.
         Supported opening braces - { <=> (, [, < and the special tag _OP_.
         Supported closing braces - } <=> ), ], > and the special tag _CL_.
         For SLURM based tasks, we suggest the use of the special tags for ease of use.
-
         See the WebDataset documentation for more information about accepted data and input formats.
     """
 
-    def __init__(self, manifest_path: str, tar_filepaths: Union[str, List[str]], shuffle_n: int = 128):
+    def __init__(self, manifest_path: str, tar_filepaths: Union[str, List[str]], shuffle_n: int = 128, rank: int = 0, world_size: int = 0, shard_strategy: str = "replicate"):
+        import braceexpand
+        
         self._manifest = collections.ASRAudioText(manifest_path, parser=parsers.make_parser([]), index_by_file_id=True)
 
         if isinstance(tar_filepaths, str):
@@ -1202,6 +1209,28 @@ class AugmentationDataset(IterableDataset):
             for bkey in brace_keys_close:
                 if bkey in tar_filepaths:
                     tar_filepaths = tar_filepaths.replace(bkey, "}")
+        
+        if isinstance(tar_filepaths, str):
+            # Brace expand
+            tar_filepaths = list(braceexpand.braceexpand(tar_filepaths))
+        
+        # Check for distributed and partition shards accordingly
+        if world_size > 1:
+            if shard_strategy == 'scatter':
+                logging.info("All tarred dataset shards will be scattered evenly across all nodes.")
+    
+                if len(tar_filepaths) % world_size != 0:
+                    logging.warning(
+                        f"Number of shards in tarred dataset ({len(tar_filepaths)}) is not divisible "
+                        f"by number of distributed workers ({world_size})."
+                    )
+    
+                begin_idx = (len(tar_filepaths) // world_size) * rank
+                end_idx = begin_idx + len(tar_filepaths) // world_size
+                tar_filepaths = tar_filepaths[begin_idx:end_idx]
+                logging.info(
+                    "Partitioning tarred dataset: process (%d) taking shards [%d, %d)", rank, begin_idx, end_idx
+                )
 
         if not HAVE_OMEGACONG_WEBDATASET:
             raise LightningNotInstalledException(self)
@@ -1212,11 +1241,42 @@ class AugmentationDataset(IterableDataset):
         else:
             logging.info("WebDataset will not shuffle files within the tar files.")
 
-        self.audio_dataset = self.audio_dataset.rename(audio='wav', key='__key__').to_tuple('audio', 'key')
+        self.audio_dataset = self.audio_dataset.rename(audio='wav', key='__key__').to_tuple('audio', 'key').pipe(self._loop_offsets)
         self.audio_iter = iter(self.audio_dataset)
 
     def __len__(self):
         return len(self._manifest)
+    
+    def _loop_offsets(self, iterator):
+        """This function is used to iterate through utterances with different offsets for each file.
+        """
+
+        class TarredAudioLoopOffsets:
+            def __init__(self, collection):
+                self.iterator = iterator
+                self.collection = collection
+                self.current_fn = None
+                self.current_bytes = None
+                self.offset_id = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.current_fn is None:
+                    self.current_bytes, self.current_fn = next(self.iterator)
+                    self.offset_id = 0
+                else:
+                    offset_list = self.collection.mapping[self.current_fn]
+                    if len(offset_list) == self.offset_id + 1:
+                        self.current_bytes, self.current_fn = next(self.iterator)
+                        self.offset_id = 0
+                    else:
+                        self.offset_id += 1
+
+                return self.current_bytes, self.current_fn, self.offset_id
+
+        return TarredAudioLoopOffsets(self._manifest)
 
     def __iter__(self):
         return self
@@ -1224,13 +1284,15 @@ class AugmentationDataset(IterableDataset):
     def __next__(self):
         while True:
             try:
-                audio_bytes, audio_filename = next(self.audio_iter)
+                audio_bytes, audio_filename, offset_id = next(self.audio_iter)
 
             except StopIteration:
                 self.audio_iter = iter(self.audio_dataset)
-                audio_bytes, audio_filename = next(self.audio_iter)
+                audio_bytes, audio_filename, offset_id = next(self.audio_iter)
             file_id, _ = os.path.splitext(os.path.basename(audio_filename))
+            manifest_idx = self._manifest.mapping[file_id][offset_id]
+            manifest_entry = self._manifest[manifest_idx]
 
             # Convert audio bytes to IO stream for processing (for SoundFile to read)
             audio_file = io.BytesIO(audio_bytes)
-            return audio_file, file_id
+            return audio_file, file_id, manifest_entry
