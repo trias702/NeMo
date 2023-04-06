@@ -78,6 +78,8 @@ def read_one_audiosegment(manifest, target_sr, rng=None, tarred_audio=False, aud
             raise TypeError("Expected augmentation dataset but got None")
         audio_file, file_id = next(audio_dataset)
         manifest_idx = manifest.mapping[file_id]
+        if isinstance(manifest_idx, list):
+            manifest_idx = manifest_idx[0]
         manifest_entry = manifest[manifest_idx]
 
         offset = 0 if manifest_entry.offset is None else manifest_entry.offset
