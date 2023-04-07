@@ -644,6 +644,8 @@ class NoiseNormPerturbation(Perturbation):
                 dataset = AugmentationDataset(manifest_filepath, tarred_audio_filepath, shuffle_n, rank=global_rank, world_size=world_size, shard_strategy=shard_strategy)
                 datasets.append(dataset)
             self._audiodataset = RandomizedChainDataset(datasets, rnd_seed=(rng if rng else 123) + (global_rank if chain_strategy=='random' else 0))
+            if len(self._audiodataset) == 0:
+                raise RuntimeError("NoiseNormPerturbation detected a zero length RandomizedChainDataset, should never happen")
             self._data_iterator = iter(self._audiodataset)
 
         self._min_snr_db = min_snr_db
@@ -655,6 +657,27 @@ class NoiseNormPerturbation(Perturbation):
     @property
     def orig_sr(self):
         return self._orig_sr
+    
+    def read_one_audiosegment(self, target_sr):
+        if self._tarred_audio:
+            if self._data_iterator is None:
+                raise TypeError("Expected valid iterator but got None")
+            try:
+                audio_file, file_id, manifest_entry = next(self._data_iterator)
+            except StopIteration:
+                self._data_iterator = iter(self._audiodataset)
+                audio_file, file_id, manifest_entry = next(self._data_iterator)
+    
+            offset = 0 if manifest_entry.offset is None else manifest_entry.offset
+            duration = 0 if manifest_entry.duration is None else manifest_entry.duration
+    
+        else:
+            audio_record = random.sample(self._manifest.data, 1)[0]
+            audio_file = audio_record.audio_file
+            offset = 0 if audio_record.offset is None else audio_record.offset
+            duration = 0 if audio_record.duration is None else audio_record.duration
+
+        return AudioSegment.from_file(audio_file, target_sr=target_sr, offset=offset, duration=duration)
 
     def perturb(self, data, ref_mic=0):
         """
@@ -662,22 +685,10 @@ class NoiseNormPerturbation(Perturbation):
             data (AudioSegment): audio data
             ref_mic (int): reference mic index for scaling multi-channel audios
         """
-        noise = read_one_audiosegment(
-            self._manifest,
-            data.sample_rate,
-            None,
-            tarred_audio=self._tarred_audio,
-            audio_dataset=self._data_iterator,
-        )
+        noise = self.read_one_audiosegment(data.sample_rate)
         
         while noise.duration < 1:
-            noise = read_one_audiosegment(
-                self._manifest,
-                data.sample_rate,
-                None,
-                tarred_audio=self._tarred_audio,
-                audio_dataset=self._data_iterator,
-            )
+            noise = self.read_one_audiosegment(data.sample_rate)
         
         self.perturb_with_input_noise(data, noise, ref_mic=ref_mic, norm_to_db=self._norm_to_db)
     
@@ -1312,7 +1323,6 @@ class AugmentationDataset(IterableDataset):
         while True:
             try:
                 audio_bytes, audio_filename, offset_id = next(self.audio_iter)
-
             except StopIteration:
                 self.audio_iter = iter(self.audio_dataset)
                 audio_bytes, audio_filename, offset_id = next(self.audio_iter)

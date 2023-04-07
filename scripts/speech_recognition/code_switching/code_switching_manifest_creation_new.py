@@ -61,6 +61,10 @@ def parse_args():
                         default=20,
                         type=int,
                         help='maximum duration (secs) of each synthetic utterance')
+    optional.add_argument('--min_mono',
+                        default=0.2,
+                        type=float,
+                        help='percentage of output data which is guaranteed to be monolingual')
     optional.add_argument('--req_hours',
                         default=100,
                         type=int,
@@ -127,10 +131,14 @@ def create_cs_manifest(args, manifests):
         created_sample_dict['texts'] = []
         created_sample_dict['paths'] = []
         created_sample_dict['durations'] = []
+        
+        pure_mono = np.random.rand() <= args.min_mono
 
         while created_sample_duration_sec < args.min_duration:
-            if args.pure_random or (len(set(created_sample_dict['lang_ids'])) == 0 or len(set(created_sample_dict['lang_ids'])) == N):
+            if (args.pure_random and not pure_mono) or (len(set(created_sample_dict['lang_ids'])) == 0 or len(set(created_sample_dict['lang_ids'])) == N):
                 lang_id = np.random.choice(langs, p=args.lang_probs)
+            #elif pure_mono:
+            #    lang_id = created_sample_dict['lang_ids'][0]
             else:
                 p = np.array(list(map(prob_dict.get, list(langs_set - set(created_sample_dict['lang_ids'])))))
                 p = p / p.sum()
@@ -149,6 +157,12 @@ def create_cs_manifest(args, manifests):
             created_sample_dict['texts'].append(sample['text'])
             created_sample_dict['paths'].append(os.path.join(sample_path, sample['audio_filepath']))
             created_sample_dict['durations'].append(sample['duration'])
+            
+            if pure_mono:
+                break
+        
+        if pure_mono:
+            assert len(set(created_sample_dict['lang_ids'])) == 1, "pure_mono failed"
 
         created_sample_dict['total_duration'] = created_sample_duration_sec
 
@@ -176,7 +190,7 @@ def mp_create_single(row, args=None):
         if sr != args.sample_rate:
             wav = librosa.core.resample(wav, orig_sr=sr, target_sr=args.sample_rate)
         
-        wav_norm = wav * (10.0 ** (args.db_norm / 20.0) / ((wav ** 2).mean() ** 0.5))
+        wav_norm = wav * (10.0 ** (args.db_norm / 20.0) / max(0.001, (wav ** 2).mean() ** 0.5))
         
         if idx < len(row['paths']) - 1:
             wav_norm = np.append(wav_norm, np.zeros(int(args.pause_join * args.sample_rate / 1000.0)))
