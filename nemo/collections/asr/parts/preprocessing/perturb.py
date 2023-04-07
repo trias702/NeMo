@@ -614,6 +614,10 @@ class NoiseNormPerturbation(Perturbation):
         audio_tar_filepaths=None,
         shuffle_n=128,
         orig_sr=16000,
+        global_rank=0,
+        world_size=0,
+        shard_strategy='scatter',
+        chain_strategy='random',
     ):
         from nemo.collections.asr.data.audio_to_text import RandomizedChainDataset
         
@@ -636,9 +640,9 @@ class NoiseNormPerturbation(Perturbation):
                 audio_tar_filepaths = [audio_tar_filepaths]
             datasets = []
             for tarred_audio_filepath, manifest_filepath in zip(audio_tar_filepaths, manifest_path):
-                dataset = AugmentationDataset(manifest_filepath, tarred_audio_filepath, shuffle_n)
+                dataset = AugmentationDataset(manifest_filepath, tarred_audio_filepath, shuffle_n, rank=global_rank, world_size=world_size, shard_strategy=shard_strategy)
                 datasets.append(dataset)
-            self._audiodataset = RandomizedChainDataset(datasets, rnd_seed=rng if rng else 123)
+            self._audiodataset = RandomizedChainDataset(datasets, rnd_seed=(rng if rng else 123) + (global_rank if chain_strategy=='random' else 0))
             self._data_iterator = iter(self._audiodataset)
 
         self._min_snr_db = min_snr_db
@@ -663,15 +667,27 @@ class NoiseNormPerturbation(Perturbation):
             tarred_audio=self._tarred_audio,
             audio_dataset=self._data_iterator,
         )
+        
+        while noise.duration < 1:
+            noise = read_one_audiosegment(
+                self._manifest,
+                data.sample_rate,
+                None,
+                tarred_audio=self._tarred_audio,
+                audio_dataset=self._data_iterator,
+            )
+        
         self.perturb_with_input_noise(data, noise, ref_mic=ref_mic, norm_to_db=self._norm_to_db)
     
     def snr_mixer(self, clean, noise, snr, norm_to_db=-25.0):
         rmsclean = (clean**2).mean(axis=0)**0.5
+        rmsclean = np.where(np.isclose(rmsclean, 0), 0.01, rmsclean)
         scalarclean = 10 ** (norm_to_db / 20) / rmsclean
         clean = clean * scalarclean
         rmsclean = (clean**2).mean(axis=0)**0.5
     
         rmsnoise = (noise**2).mean(axis=0)**0.5
+        rmsnoise = np.where(np.isclose(rmsnoise, 0), 0.01, rmsnoise)
         scalarnoise = 10 ** (norm_to_db / 20) /rmsnoise
         noise = noise * scalarnoise
         rmsnoise = (noise**2).mean(axis=0)**0.5
@@ -685,7 +701,8 @@ class NoiseNormPerturbation(Perturbation):
 
     def norm_audio_to_db(self, x, norm_to_db):
         rms = (x ** 2).mean(axis=0) ** 0.5
-        scalar = 10 ** (norm_to_db / 20.0) / (rms)
+        rms = np.where(np.isclose(rms, 0), 0.01, rms)
+        scalar = 10 ** (norm_to_db / 20.0) / rms
         return x * scalar
     
     def concatenate_noise_sample(self, clean, noise, fs, silence_length=0.5):
@@ -730,6 +747,9 @@ class NoiseNormPerturbation(Perturbation):
         
         data_norm = self.norm_audio_to_db(data._samples, norm_to_db)
         noise_norm = self.norm_audio_to_db(noise._samples, norm_to_db)
+        
+        if len(data_norm) == 0:
+            return
         
         if len(noise_norm) < len(data_norm):
             '''
@@ -1050,7 +1070,7 @@ class AudioAugmentor(object):
         return cls(perturbations=ptbs)
 
 
-def process_augmentations(augmenter) -> Optional[AudioAugmentor]:
+def process_augmentations(augmenter, global_rank=0, world_size=0) -> Optional[AudioAugmentor]:
     """Process list of online data augmentations.
     Accepts either an AudioAugmentor object with pre-defined augmentations,
     or a dictionary that points to augmentations that have been defined.
@@ -1164,8 +1184,12 @@ def process_augmentations(augmenter) -> Optional[AudioAugmentor]:
                 raise ValueError("`prob` must be a float value between 0 and 1.")
 
             try:
-                #'rank' in NoiseNormPerturbation.__dict__['__init__'].__code__.co_varnames
-                augmentation = perturbation_types[augment_name](**augment_kwargs)
+                augmentation_class = perturbation_types[augment_name]
+                if 'global_rank' in augmentation_class.__dict__['__init__'].__code__.co_varnames:
+                    augment_kwargs['global_rank'] = global_rank
+                if 'world_size' in augmentation_class.__dict__['__init__'].__code__.co_varnames:
+                    augment_kwargs['world_size'] = world_size
+                augmentation = augmentation_class(**augment_kwargs)
                 augmentations.append([prob, augmentation])
             except KeyError:
                 raise KeyError(f"Invalid perturbation name. Allowed values : {perturbation_types.keys()}")
@@ -1192,7 +1216,7 @@ class AugmentationDataset(IterableDataset):
         See the WebDataset documentation for more information about accepted data and input formats.
     """
 
-    def __init__(self, manifest_path: str, tar_filepaths: Union[str, List[str]], shuffle_n: int = 128, rank: int = 0, world_size: int = 0, shard_strategy: str = "replicate"):
+    def __init__(self, manifest_path: str, tar_filepaths: Union[str, List[str]], shuffle_n: int = 128, rank: int = 0, world_size: int = 0, shard_strategy: str = "scatter"):
         import braceexpand
         
         self._manifest = collections.ASRAudioText(manifest_path, parser=parsers.make_parser([]), index_by_file_id=True)
