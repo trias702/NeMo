@@ -616,8 +616,9 @@ class NoiseNormPerturbation(Perturbation):
         orig_sr=16000,
         global_rank=0,
         world_size=0,
-        shard_strategy='scatter',
+        shard_strategy='replicate',
         chain_strategy='random',
+        epsilon=0.01,
     ):
         from nemo.collections.asr.data.audio_to_text import RandomizedChainDataset
         
@@ -649,7 +650,7 @@ class NoiseNormPerturbation(Perturbation):
         self._max_snr_db = max_snr_db
         self._norm_to_db = norm_to_db
         self._snr_samples = snr_samples if isinstance(snr_samples, list) and len(snr_samples) > 0 else None
-        self._epsilon = 0.01
+        self._epsilon = epsilon
 
     @property
     def orig_sr(self):
@@ -692,6 +693,7 @@ class NoiseNormPerturbation(Perturbation):
         scalarnoise = 10 ** (norm_to_db / 20) / rmsnoise
         noise = noise * scalarnoise
         rmsnoise = (noise**2).mean(axis=0)**0.5
+        rmsnoise = np.where(np.isclose(rmsnoise, 0), self._epsilon, rmsnoise)
         
         # Set the noise level for a given SNR
         noisescalar = np.sqrt(rmsclean / (10**(snr/20)) / rmsnoise)
@@ -1217,7 +1219,7 @@ class AugmentationDataset(IterableDataset):
         See the WebDataset documentation for more information about accepted data and input formats.
     """
 
-    def __init__(self, manifest_path: str, tar_filepaths: Union[str, List[str]], shuffle_n: int = 128, rank: int = 0, world_size: int = 0, shard_strategy: str = "scatter"):
+    def __init__(self, manifest_path: str, tar_filepaths: Union[str, List[str]], shuffle_n: int = 128, rank: int = 0, world_size: int = 0, shard_strategy: str = "replicate"):
         import braceexpand
         
         self._manifest = collections.ASRAudioText(manifest_path, parser=parsers.make_parser([]), index_by_file_id=True)
