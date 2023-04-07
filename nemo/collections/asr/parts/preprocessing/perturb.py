@@ -649,6 +649,7 @@ class NoiseNormPerturbation(Perturbation):
         self._max_snr_db = max_snr_db
         self._norm_to_db = norm_to_db
         self._snr_samples = snr_samples if isinstance(snr_samples, list) and len(snr_samples) > 0 else None
+        self._epsilon = 0.01
 
     @property
     def orig_sr(self):
@@ -681,14 +682,14 @@ class NoiseNormPerturbation(Perturbation):
     
     def snr_mixer(self, clean, noise, snr, norm_to_db=-25.0):
         rmsclean = (clean**2).mean(axis=0)**0.5
-        rmsclean = np.where(np.isclose(rmsclean, 0), 0.01, rmsclean)
+        rmsclean = np.where(np.isclose(rmsclean, 0), self._epsilon, rmsclean)
         scalarclean = 10 ** (norm_to_db / 20) / rmsclean
         clean = clean * scalarclean
         rmsclean = (clean**2).mean(axis=0)**0.5
     
         rmsnoise = (noise**2).mean(axis=0)**0.5
-        rmsnoise = np.where(np.isclose(rmsnoise, 0), 0.01, rmsnoise)
-        scalarnoise = 10 ** (norm_to_db / 20) /rmsnoise
+        rmsnoise = np.where(np.isclose(rmsnoise, 0), self._epsilon, rmsnoise)
+        scalarnoise = 10 ** (norm_to_db / 20) / rmsnoise
         noise = noise * scalarnoise
         rmsnoise = (noise**2).mean(axis=0)**0.5
         
@@ -701,7 +702,7 @@ class NoiseNormPerturbation(Perturbation):
 
     def norm_audio_to_db(self, x, norm_to_db):
         rms = (x ** 2).mean(axis=0) ** 0.5
-        rms = np.where(np.isclose(rms, 0), 0.01, rms)
+        rms = np.where(np.isclose(rms, 0), self._epsilon, rms)
         scalar = 10 ** (norm_to_db / 20.0) / rms
         return x * scalar
     
