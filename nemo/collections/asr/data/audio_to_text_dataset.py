@@ -524,7 +524,12 @@ def get_code_switched_dataset(
             conf['tarred_audio_filepaths'] = tarred_audio_filepath
             conf['language'] = lang
         if tarred_audio_filepath is None or len(tarred_audio_filepath) == 0:
-            dataset = get_bpe_dataset(config=conf, tokenizer=tokenizer, augmentor=None)
+            if conf.get('is_shelve', False):
+                dataset = get_shelve_dataset(config=conf, tokenizer=tokenizer, augmentor=None)
+            elif tokenizer is None:
+                dataset = get_char_dataset(config=conf, augmentor=None)
+            else:
+                dataset = get_bpe_dataset(config=conf, tokenizer=tokenizer, augmentor=None)
         else:
             dataset = get_tarred_dataset(
                 config=conf,
