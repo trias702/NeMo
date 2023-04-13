@@ -615,7 +615,7 @@ class NoiseNormPerturbation(Perturbation):
         shuffle_n=128,
         orig_sr=16000,
         global_rank=0,
-        world_size=0,
+        world_size=1,
         shard_strategy='replicate',
         chain_strategy='random',
         epsilon=0.01,
@@ -685,8 +685,25 @@ class NoiseNormPerturbation(Perturbation):
             data (AudioSegment): audio data
             ref_mic (int): reference mic index for scaling multi-channel audios
         """
-        noise = self.read_one_audiosegment(data.sample_rate)
+        '''
+        noise = read_one_audiosegment(
+            self._manifest,
+            data.sample_rate,
+            None,
+            tarred_audio=self._tarred_audio,
+            audio_dataset=self._data_iterator,
+        )
         
+        while noise.duration < 1:
+            noise = read_one_audiosegment(
+                self._manifest,
+                data.sample_rate,
+                None,
+                tarred_audio=self._tarred_audio,
+                audio_dataset=self._data_iterator,
+            )
+        '''
+        noise = self.read_one_audiosegment(data.sample_rate)
         while noise.duration < 1:
             noise = self.read_one_audiosegment(data.sample_rate)
         
@@ -719,7 +736,7 @@ class NoiseNormPerturbation(Perturbation):
         scalar = 10 ** (norm_to_db / 20.0) / rms
         return x * scalar
     
-    def concatenate_noise_sample(self, clean, noise, fs, silence_length=0.5):
+    def concatenate_noise_sample(self, clean, noise, fs, silence_length=0.25):
         while len(noise) < len(clean):
             if noise.ndim > 1:
                 zeros = np.zeros((int(fs*silence_length), noise.shape[-1]))
@@ -1084,7 +1101,7 @@ class AudioAugmentor(object):
         return cls(perturbations=ptbs)
 
 
-def process_augmentations(augmenter, global_rank=0, world_size=0) -> Optional[AudioAugmentor]:
+def process_augmentations(augmenter, global_rank=0, world_size=1) -> Optional[AudioAugmentor]:
     """Process list of online data augmentations.
     Accepts either an AudioAugmentor object with pre-defined augmentations,
     or a dictionary that points to augmentations that have been defined.
@@ -1230,45 +1247,15 @@ class AugmentationDataset(IterableDataset):
         See the WebDataset documentation for more information about accepted data and input formats.
     """
 
-    def __init__(self, manifest_path: str, tar_filepaths: Union[str, List[str]], shuffle_n: int = 128, rank: int = 0, world_size: int = 0, shard_strategy: str = "replicate"):
-        import braceexpand
+    def __init__(self, manifest_path: str, tar_filepaths: Union[str, List[str]], shuffle_n: int = 128, rank: int = 0, world_size: int = 1, shard_strategy: str = "replicate"):
+        from nemo.collections.asr.data.audio_to_text import expand_audio_filepaths
         
         self._manifest = collections.ASRAudioText(manifest_path, parser=parsers.make_parser([]), index_by_file_id=True)
+        #self._length = len(self._manifest)
 
-        if isinstance(tar_filepaths, str):
-            # Replace '(' and '[' with '{'
-            brace_keys_open = ['(', '[', '<', '_OP_']
-            for bkey in brace_keys_open:
-                if bkey in tar_filepaths:
-                    tar_filepaths = tar_filepaths.replace(bkey, "{")
-
-            # Replace ')' and ']' with '}'
-            brace_keys_close = [')', ']', '>', '_CL_']
-            for bkey in brace_keys_close:
-                if bkey in tar_filepaths:
-                    tar_filepaths = tar_filepaths.replace(bkey, "}")
-        
-        if isinstance(tar_filepaths, str):
-            # Brace expand
-            tar_filepaths = list(braceexpand.braceexpand(tar_filepaths))
-        
-        # Check for distributed and partition shards accordingly
-        if world_size > 1:
-            if shard_strategy == 'scatter':
-                logging.info("All tarred dataset shards will be scattered evenly across all nodes.")
-    
-                if len(tar_filepaths) % world_size != 0:
-                    logging.warning(
-                        f"Number of shards in tarred dataset ({len(tar_filepaths)}) is not divisible "
-                        f"by number of distributed workers ({world_size})."
-                    )
-    
-                begin_idx = (len(tar_filepaths) // world_size) * rank
-                end_idx = begin_idx + len(tar_filepaths) // world_size
-                tar_filepaths = tar_filepaths[begin_idx:end_idx]
-                logging.info(
-                    "Partitioning tarred dataset: process (%d) taking shards [%d, %d)", rank, begin_idx, end_idx
-                )
+        #if world_size > 1 and shard_strategy == 'scatter':
+        #    self._length = int((len(self._manifest) // len(tar_filepaths)) * (len(tar_filepaths) // world_size))
+        tar_filepaths = expand_audio_filepaths(tar_filepaths, shard_strategy=shard_strategy, world_size=world_size, global_rank=rank)
 
         if not HAVE_OMEGACONG_WEBDATASET:
             raise LightningNotInstalledException(self)
@@ -1279,8 +1266,7 @@ class AugmentationDataset(IterableDataset):
         else:
             logging.info("WebDataset will not shuffle files within the tar files.")
 
-        self.audio_dataset = self.audio_dataset.rename(audio='wav', key='__key__').to_tuple('audio', 'key').pipe(self._loop_offsets)
-        self.audio_iter = iter(self.audio_dataset)
+        self.audio_dataset = self.audio_dataset.rename(audio='wav;ogg;flac', key='__key__').to_tuple('audio', 'key').pipe(self._loop_offsets)
 
     def __len__(self):
         return len(self._manifest)
@@ -1316,20 +1302,40 @@ class AugmentationDataset(IterableDataset):
 
         return TarredAudioLoopOffsets(self._manifest)
 
+    '''
     def __iter__(self):
+        self.audio_iter = iter(self.audio_dataset) # here or in constructor?
         return self
 
     def __next__(self):
+        try:
+            audio_bytes, audio_filename, offset_id = next(self.audio_iter)
+        except StopIteration:
+            self.audio_iter = iter(self.audio_dataset)
+            audio_bytes, audio_filename, offset_id = next(self.audio_iter)
+        file_id, _ = os.path.splitext(os.path.basename(audio_filename))
+        manifest_idx = self._manifest.mapping[file_id][offset_id]
+        manifest_entry = self._manifest[manifest_idx]
+
+        # Convert audio bytes to IO stream for processing (for SoundFile to read)
+        audio_file = io.BytesIO(audio_bytes)
+        return audio_file, file_id, manifest_entry
+    '''
+    
+    def __iter__(self):
+        audio_iter = iter(self.audio_dataset)
+        
         while True:
             try:
-                audio_bytes, audio_filename, offset_id = next(self.audio_iter)
+                audio_bytes, audio_filename, offset_id = next(audio_iter)
+                file_id, _ = os.path.splitext(os.path.basename(audio_filename))
+                manifest_idx = self._manifest.mapping[file_id][offset_id]
+                manifest_entry = self._manifest[manifest_idx]
+        
+                # Convert audio bytes to IO stream for processing (for SoundFile to read)
+                audio_file = io.BytesIO(audio_bytes)
+                yield audio_file, file_id, manifest_entry
             except StopIteration:
-                self.audio_iter = iter(self.audio_dataset)
-                audio_bytes, audio_filename, offset_id = next(self.audio_iter)
-            file_id, _ = os.path.splitext(os.path.basename(audio_filename))
-            manifest_idx = self._manifest.mapping[file_id][offset_id]
-            manifest_entry = self._manifest[manifest_idx]
-
-            # Convert audio bytes to IO stream for processing (for SoundFile to read)
-            audio_file = io.BytesIO(audio_bytes)
-            return audio_file, file_id, manifest_entry
+                audio_iter = iter(self.audio_dataset)
+            
+                

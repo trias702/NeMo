@@ -193,7 +193,7 @@ def expand_audio_filepaths(audio_tar_filepaths, shard_strategy: str, world_size:
 
     if isinstance(audio_tar_filepaths, str):
         # Brace expand
-        audio_tar_filepaths = list(braceexpand.braceexpand(audio_tar_filepaths))
+        audio_tar_filepaths = list(braceexpand.braceexpand(audio_tar_filepaths, escape=False))
 
     # Expand store paths into WebDataset URLs
     audio_tar_filepaths = [
@@ -764,6 +764,7 @@ class ShelveAudioToBPEDataset(_AudioTextShelveDataset):
         trim: bool = False,
         use_start_end_token: bool = True,
         return_sample_id: bool = False,
+        language: Optional[str] = None,
     ):
         if use_start_end_token and hasattr(tokenizer, 'bos_token'):
             bos_id = tokenizer.bos_id
@@ -781,20 +782,27 @@ class ShelveAudioToBPEDataset(_AudioTextShelveDataset):
             pad_id = 0
         
         class TokenizerWrapper:
-            def __init__(self, tokenizer):
+            def __init__(self, tokenizer, lang=None):
                 if isinstance(tokenizer, tokenizers.aggregate_tokenizer.AggregateTokenizer):
                     self.is_aggregate = True
                 else:
                     self.is_aggregate = False
                 self._tokenizer = tokenizer
-    
+                self.lang = lang
+
             def __call__(self, *args):
+                if isinstance(args[0], List) and self.is_aggregate:
+                    t = []
+                    for span in args[0]:
+                        t.extend(self._tokenizer.text_to_ids(span['str'], span['lang']))
+                    return t
+
                 t = self._tokenizer.text_to_ids(*args)
                 return t
         
         super().__init__(
             manifest_filepath=manifest_filepath,
-            parser=TokenizerWrapper(tokenizer),
+            parser=TokenizerWrapper(tokenizer, language),
             sample_rate=sample_rate,
             int_values=int_values,
             augmentor=augmentor,
@@ -872,6 +880,7 @@ class AudioToBPEDataset(_AudioTextDataset):
         use_start_end_token: bool = True,
         return_sample_id: bool = False,
         channel_selector: Optional[ChannelSelectorType] = None,
+        language: Optional[str] = None,
     ):
         if use_start_end_token and hasattr(tokenizer, "bos_id") and tokenizer.bos_id > 0:
             bos_id = tokenizer.bos_id
@@ -889,12 +898,13 @@ class AudioToBPEDataset(_AudioTextDataset):
             pad_id = 0
 
         class TokenizerWrapper:
-            def __init__(self, tokenizer):
+            def __init__(self, tokenizer, lang=None):
                 if isinstance(tokenizer, tokenizers.aggregate_tokenizer.AggregateTokenizer):
                     self.is_aggregate = True
                 else:
                     self.is_aggregate = False
                 self._tokenizer = tokenizer
+                self.lang = lang
 
             def __call__(self, *args):
                 if isinstance(args[0], List) and self.is_aggregate:
@@ -908,7 +918,7 @@ class AudioToBPEDataset(_AudioTextDataset):
 
         super().__init__(
             manifest_filepath=manifest_filepath,
-            parser=TokenizerWrapper(tokenizer),
+            parser=TokenizerWrapper(tokenizer, language),
             sample_rate=sample_rate,
             int_values=int_values,
             augmentor=augmentor,
@@ -1432,6 +1442,7 @@ class TarredAudioToBPEDataset(_TarredAudioToTextDataset):
         global_rank: int = 0,
         world_size: int = 0,
         return_sample_id: bool = False,
+        language: Optional[str] = None,
     ):
         if use_start_end_token and hasattr(tokenizer, "bos_id") and tokenizer.bos_id > 0:
             bos_id = tokenizer.bos_id
@@ -1449,12 +1460,13 @@ class TarredAudioToBPEDataset(_TarredAudioToTextDataset):
             pad_id = 0
 
         class TokenizerWrapper:
-            def __init__(self, tokenizer):
+            def __init__(self, tokenizer, lang=None):
                 if isinstance(tokenizer, tokenizers.aggregate_tokenizer.AggregateTokenizer):
                     self.is_aggregate = True
                 else:
                     self.is_aggregate = False
                 self._tokenizer = tokenizer
+                self.lang = lang
 
             def __call__(self, *args):
                 if isinstance(args[0], List) and self.is_aggregate:
@@ -1469,7 +1481,7 @@ class TarredAudioToBPEDataset(_TarredAudioToTextDataset):
         super().__init__(
             audio_tar_filepaths=audio_tar_filepaths,
             manifest_filepath=manifest_filepath,
-            parser=TokenizerWrapper(tokenizer),
+            parser=TokenizerWrapper(tokenizer, language),
             sample_rate=sample_rate,
             int_values=int_values,
             augmentor=augmentor,
@@ -1548,5 +1560,7 @@ class RandomizedChainDataset(ChainDataset):
         for dataset_idx in shuffled_order:
             d = self.datasets[dataset_idx]
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            for x in d:
+            for idx, x in enumerate(d):
                 yield x
+                if idx >= len(d) - 1:
+                    break

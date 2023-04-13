@@ -190,7 +190,7 @@ def mp_create_single(row, args=None):
         if sr != args.sample_rate:
             wav = librosa.core.resample(wav, orig_sr=sr, target_sr=args.sample_rate)
         
-        wav_norm = wav * (10.0 ** (args.db_norm / 20.0) / max(0.001, (wav ** 2).mean() ** 0.5))
+        wav_norm = wav * (10.0 ** (args.db_norm / 20.0) / np.maximum(0.01, (wav ** 2).mean() ** 0.5))
         
         if idx < len(row['paths']) - 1:
             wav_norm = np.append(wav_norm, np.zeros(int(args.pause_join * args.sample_rate / 1000.0)))
