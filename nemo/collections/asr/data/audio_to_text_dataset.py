@@ -507,8 +507,8 @@ def get_code_switched_dataset(
     augmentor: Optional['AudioAugmentor'] = None,
 ) -> CodeSwitchedDataset:
     
-    #print('*** CS manifest_path: ', config['manifest_filepath'], flush=True)
-    #print('*** CS tarred_paths: ', config.get('tarred_audio_filepaths', None), flush=True)
+    print('*** CS manifest_path: ', config['manifest_filepath'], flush=True)
+    print('*** CS tarred_paths: ', config.get('tarred_audio_filepaths', None), flush=True)
     tarred_audio_filepaths = config.get('tarred_audio_filepaths', None)
     manifest_filepaths = config['manifest_filepath']
     if tarred_audio_filepaths is None:
@@ -552,6 +552,7 @@ def get_code_switched_dataset(
         pause_start=config.get('code_switch_pause_start', 20),
         pause_join=config.get('code_switch_pause_join', 80),
         pause_end=config.get('code_switch_pause_end', 20),
+        sampling_scales=config.get('code_switch_sampling_scales', None),
         seed=config.get('code_switch_seed', None),
         global_rank=global_rank,
         world_size=world_size,
@@ -743,6 +744,26 @@ def get_audio_to_text_char_dataset_from_config(
                 world_size=world_size,
                 augmentor=augmentor,
             )
+    elif config.get('is_code_switch', False):
+        if 'manifest_filepath' in config and config['manifest_filepath'] is None:
+            logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
+            return None
+        if not 'code_switch_languages' in config:
+            logging.warning(f"Code switched dataset requires `code_switch_languages` list but it was not provided. Config: {config}")
+            return None
+        if ('code_switch_probabilities' in config) and (config['code_switch_probabilities'] is not None) and (not isclose(sum(config['code_switch_probabilities']), 1, abs_tol=1e-6)):
+            logging.warning(f"`code_switch_probabilities` need to sum to 1. Config: {config}")
+            return None
+        
+        shuffle_n = config.get('shuffle_n', 4 * config['batch_size']) if shuffle else 0
+        dataset = get_code_switched_dataset(
+            config=config,
+            shuffle_n=shuffle_n,
+            global_rank=global_rank,
+            world_size=world_size,
+            tokenizer=None,
+            augmentor=augmentor,
+        )
     elif config.get('is_shelve', False):
         if 'manifest_filepath' in config and config['manifest_filepath'] is None:
             logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
@@ -855,20 +876,6 @@ def get_audio_to_text_bpe_dataset_from_config(
                 world_size=world_size,
                 augmentor=augmentor,
             )
-    elif config.get('is_shelve', False):
-        if 'manifest_filepath' in config and config['manifest_filepath'] is None:
-            logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
-            return None
-        if is_concat:
-            dataset = get_concat_shelve_dataset(
-                config=config,
-                global_rank=global_rank,
-                world_size=world_size,
-                tokenizer=tokenizer,
-                augmentor=augmentor,
-            )
-        else:
-            dataset = get_shelve_dataset(config=config, tokenizer=tokenizer, augmentor=augmentor)
     elif config.get('is_code_switch', False):
         if 'manifest_filepath' in config and config['manifest_filepath'] is None:
             logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
@@ -889,6 +896,20 @@ def get_audio_to_text_bpe_dataset_from_config(
             tokenizer=tokenizer,
             augmentor=augmentor,
         )
+    elif config.get('is_shelve', False):
+        if 'manifest_filepath' in config and config['manifest_filepath'] is None:
+            logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
+            return None
+        if is_concat:
+            dataset = get_concat_shelve_dataset(
+                config=config,
+                global_rank=global_rank,
+                world_size=world_size,
+                tokenizer=tokenizer,
+                augmentor=augmentor,
+            )
+        else:
+            dataset = get_shelve_dataset(config=config, tokenizer=tokenizer, augmentor=augmentor)
     else:
         if 'manifest_filepath' in config and config['manifest_filepath'] is None:
             logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")

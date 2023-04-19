@@ -592,15 +592,17 @@ class NoiseNormPerturbation(Perturbation):
     Also tiles shorter noise samples up to their corresponding clean audio length.
 
     Args:
-        manifest_path (str): Manifest file with paths to noise files
+        manifest_path (str or list): Manifest file with paths to noise files, can be list if using multiple noise sources
         min_snr_db (float): Minimum SNR of audio after noise is added
         max_snr_db (float): Maximum SNR of audio after noise is added
         snr_samples (list): A discrete list of SNRs DBs to sample from when mixing, will be used instead of [min_snr_db,max_snr_db]
         norm_to_db (float): Will normalise clean, noise, and mixed samples to this DB
-        audio_tar_filepaths (list) : Tar files, if noise audio files are tarred
+        audio_tar_filepaths (str or list) : Tar files, if noise audio files are tarred, can be list for multiple sources
         shuffle_n (int): Shuffle parameter for shuffling buffered files from the tar files
         orig_sr (int): Original sampling rate of the noise files
         rng (int): Random seed. Default is None
+        shard_strategy (str): if you're using tarred audio and wish to scatter instead of replicate, set this to 'scatter'
+        epsilon (float): minimum value for RMS DB normalisation to avoid divide by zero
     """
 
     def __init__(
@@ -617,7 +619,6 @@ class NoiseNormPerturbation(Perturbation):
         global_rank=0,
         world_size=1,
         shard_strategy='replicate',
-        chain_strategy='random',
         epsilon=0.01,
     ):
         from nemo.collections.asr.data.audio_to_text import RandomizedChainDataset
@@ -643,7 +644,7 @@ class NoiseNormPerturbation(Perturbation):
             for tarred_audio_filepath, manifest_filepath in zip(audio_tar_filepaths, manifest_path):
                 dataset = AugmentationDataset(manifest_filepath, tarred_audio_filepath, shuffle_n, rank=global_rank, world_size=world_size, shard_strategy=shard_strategy)
                 datasets.append(dataset)
-            self._audiodataset = RandomizedChainDataset(datasets, rnd_seed=(rng if rng else 123) + (global_rank if chain_strategy=='random' else 0))
+            self._audiodataset = RandomizedChainDataset(datasets, rnd_seed=(rng if rng else random.randint(0, 30000)) + global_rank)
             if len(self._audiodataset) == 0:
                 raise RuntimeError("NoiseNormPerturbation detected a zero length RandomizedChainDataset, should never happen")
             self._data_iterator = iter(self._audiodataset)

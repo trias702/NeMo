@@ -314,6 +314,7 @@ class CodeSwitchedDataset(IterableDataset):
             Defaults to 80
         pause_end (int): terminates all CS samples with silence equal to this value (msecs)
             Defaults to 20
+        sampling_scales (list): gives you the ability to upsample/downsample by language
         seed: Optional value to seed the numpy RNG.
         global_rank (int): Worker rank, used for partitioning map style datasets. Defaults to 0.
         world_size (int): Total number of processes, used for partitioning map style datasets. Defaults to 1.
@@ -337,6 +338,7 @@ class CodeSwitchedDataset(IterableDataset):
         pause_start: int = 20,
         pause_join: int = 80,
         pause_end: int = 20,
+        sampling_scales: Optional[List[float]] = None,
         seed: Optional[int] = None,
         global_rank: int = 0,
         world_size: int = 1,
@@ -374,6 +376,10 @@ class CodeSwitchedDataset(IterableDataset):
         else:
             self.prob_dict = {l:lang_probs[i] for i,l in enumerate(self.langs)}
         self.lang_probs = np.array(list(self.prob_dict.values()))
+        if sampling_scales is not None and len(sampling_scales) == len(self.langs):
+            self.sampling_scales = {k:v for k,v in zip(self.langs, sampling_scales)}
+        else:
+            self.sampling_scales = {k:1 for k in self.langs}
 
         #if isinstance(self.datasets[self.langs[0]], IterableDataset):
         #    self.kind = 'iterable'
@@ -393,10 +399,10 @@ class CodeSwitchedDataset(IterableDataset):
             
             if isiterable:
                 self.lang_kind[lang] = 'iterable'
-                self.length += len(dataset)
+                self.length += int(len(dataset) * self.sampling_scales[lang])
             else:
                 self.lang_kind[lang] = 'map'
-                self.length += len(dataset) // world_size
+                self.length += int((len(dataset) // world_size) * self.sampling_scales[lang])
         
         if seed is not None:
             np.random.seed(seed)
