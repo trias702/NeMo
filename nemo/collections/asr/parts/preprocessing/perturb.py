@@ -711,24 +711,24 @@ class NoiseNormPerturbation(Perturbation):
         self.perturb_with_input_noise(data, noise, ref_mic=ref_mic, norm_to_db=self._norm_to_db)
     
     def snr_mixer(self, clean, noise, snr, norm_to_db=-25.0):
-        rmsclean = (clean**2).mean(axis=0)**0.5
-        rmsclean = np.where(np.isclose(rmsclean, 0), self._epsilon, rmsclean)
-        scalarclean = 10 ** (norm_to_db / 20) / rmsclean
-        clean = clean * scalarclean
-        rmsclean = (clean**2).mean(axis=0)**0.5
-    
-        rmsnoise = (noise**2).mean(axis=0)**0.5
-        rmsnoise = np.where(np.isclose(rmsnoise, 0), self._epsilon, rmsnoise)
-        scalarnoise = 10 ** (norm_to_db / 20) / rmsnoise
-        noise = noise * scalarnoise
-        rmsnoise = (noise**2).mean(axis=0)**0.5
-        rmsnoise = np.where(np.isclose(rmsnoise, 0), self._epsilon, rmsnoise)
-        
+        """
+        Mixes the clean audio with the noise
+        Args:
+            clean (numpy array): the clean audio data
+            noise (numpy array): the noise audio data
+            snr (float): the SNR value for the mixing
+            norm_to_db (float): the DB value to normalise to before mixing
+        """
+        clean = self.norm_audio_to_db(clean, norm_to_db)
+        noise = self.norm_audio_to_db(noise, norm_to_db)
+
         # Set the noise level for a given SNR
-        noisescalar = np.sqrt(rmsclean / (10**(snr/20)) / rmsnoise)
+        # note that if your noise doesn't overlap with your audio then your target SNR
+        # may not be achievable. Consider using an rms-threshold in the future
+        noisescalar = 10 ** (-snr / 20.0)
         noisenewlevel = noise * noisescalar
         noisyspeech = clean + noisenewlevel
-        
+
         return clean, noisenewlevel, noisyspeech
 
     def norm_audio_to_db(self, x, norm_to_db):
@@ -777,8 +777,8 @@ class NoiseNormPerturbation(Perturbation):
         if norm_to_db is None:
             norm_to_db = data_rms
         
-        data_norm = self.norm_audio_to_db(data._samples, norm_to_db)
-        noise_norm = self.norm_audio_to_db(noise._samples, norm_to_db)
+        data_norm = data._samples
+        noise_norm = noise._samples
         
         if len(data_norm) == 0:
             return
