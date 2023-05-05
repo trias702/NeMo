@@ -14,7 +14,7 @@
 
 import io
 import logging
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import soundfile as sf
@@ -338,7 +338,7 @@ class CodeSwitchedDataset(IterableDataset):
         pause_start: int = 20,
         pause_join: int = 80,
         pause_end: int = 20,
-        sampling_scales: Optional[List[float]] = None,
+        sampling_scales: Optional[Union[float, List[float]]] = None,
         seed: Optional[int] = None,
         global_rank: int = 0,
         world_size: int = 1,
@@ -376,7 +376,9 @@ class CodeSwitchedDataset(IterableDataset):
         else:
             self.prob_dict = {l:lang_probs[i] for i,l in enumerate(self.langs)}
         self.lang_probs = np.array(list(self.prob_dict.values()))
-        if sampling_scales is not None and len(sampling_scales) == len(self.langs):
+        if sampling_scales is not None and not isinstance(sampling_scales, list):
+            self.sampling_scales = {k:sampling_scales for k in self.langs}
+        elif sampling_scales is not None and isinstance(sampling_scales, list) and len(sampling_scales) == len(self.langs):
             self.sampling_scales = {k:v for k,v in zip(self.langs, sampling_scales)}
         else:
             self.sampling_scales = {k:1 for k in self.langs}
@@ -403,13 +405,22 @@ class CodeSwitchedDataset(IterableDataset):
             else:
                 self.lang_kind[lang] = 'map'
                 self.length += int((len(dataset) // world_size) * self.sampling_scales[lang])
+        print('*** Final CS Length is: ', self.length, flush=True)
         
         if seed is not None:
             np.random.seed(seed)
         
         # set this to ensure compatibility with models searching for the collate_fn
         # since this class stores datasets as a dict, not list
-        self.collate_fn = self.datasets[self.langs[0]].collate_fn
+        #self.collate_fn = self.datasets[self.langs[0]].collate_fn
+        if hasattr(self.datasets[self.langs[0]], 'collate_fn'):
+            self.collate_fn = self.datasets[self.langs[0]].collate_fn
+        elif hasattr(self.datasets[self.langs[0]].datasets[0], 'collate_fn'):
+            # support datasets that are lists of entries
+            self.collate_fn = self.datasets[self.langs[0]].datasets[0].collate_fn
+        else:
+            # support datasets that are lists of lists
+            self.collate_fn = self.datasets[self.langs[0]].datasets[0].datasets[0].collate_fn
         
     def get_iterable_by_lang(self, lang):
         dataset = self.datasets[lang]

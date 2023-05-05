@@ -424,6 +424,8 @@ def get_tarred_dataset(
     """
     tarred_audio_filepaths = config['tarred_audio_filepaths']
     manifest_filepaths = config['manifest_filepath']
+    print('*** chk1 : ', tarred_audio_filepaths, flush=True)
+    print('*** chk2 : ', manifest_filepaths, flush=True)
     datasets = []
     tarred_audio_filepaths = convert_to_config_list(tarred_audio_filepaths)
     manifest_filepaths = convert_to_config_list(manifest_filepaths)
@@ -445,12 +447,16 @@ def get_tarred_dataset(
     if 'max_utts' in config:
         raise ValueError('"max_utts" parameter is not supported for tarred datasets')
 
+    print('*** chk3 : ', tarred_audio_filepaths, flush=True)
+    print('*** chk4 : ', manifest_filepaths, flush=True)
     for dataset_idx, (tarred_audio_filepath, manifest_filepath) in enumerate(
         zip(tarred_audio_filepaths, manifest_filepaths)
     ):
         if len(tarred_audio_filepath) == 1:
             tarred_audio_filepath = tarred_audio_filepath[0]
         if tokenizer is None:
+            print('*** tar path: ', tarred_audio_filepath, flush=True)
+            print('*** manifest path: ', manifest_filepath, flush=True)
             dataset = audio_to_text.TarredAudioToCharDataset(
                 audio_tar_filepaths=tarred_audio_filepath,
                 manifest_filepath=manifest_filepath,
@@ -472,6 +478,8 @@ def get_tarred_dataset(
                 return_sample_id=config.get('return_sample_id', False),
             )
         else:
+            print('*** tar path: ', tarred_audio_filepath, flush=True)
+            print('*** manifest path: ', manifest_filepath, flush=True)
             dataset = audio_to_text.TarredAudioToBPEDataset(
                 audio_tar_filepaths=tarred_audio_filepath,
                 manifest_filepath=manifest_filepath,
