@@ -452,12 +452,17 @@ class CodeSwitchedDataset(IterableDataset):
                 lang_id = np.random.choice(list(self.langs_set - set(created_sample_langs)), p=p)
 
             audio, audio_len, labels, labels_len, *_ = self.get_sample_from_language(lang_id)
-            sample_duration = len(audio) / self.sample_rate
-            if comp_text.device != labels.device:
-                comp_text = comp_text.to(labels.device)
 
+            # if not audio.sum().is_nonzero():
+            if audio.count_nonzero().item() == 0:
+                continue
+
+            sample_duration = len(audio) / self.sample_rate
             if (created_sample_duration_sec + sample_duration) > self.max_duration:
                 continue
+            
+            if comp_text.device != labels.device:
+                comp_text = comp_text.to(labels.device)
             
             if audio.ndim > 1 and self.force_monochannel:
                 audio = audio.mean(dim=-1)
@@ -487,7 +492,8 @@ class CodeSwitchedDataset(IterableDataset):
             comp_audio = np.zeros(shape=(int(self.pause_start * self.sample_rate / 1000.0),), dtype=created_sample_audios[0].dtype)
         
         for idx, wav in enumerate(created_sample_audios):
-            wav = np.trim_zeros(wav)
+            if not multichannel:
+                wav = np.trim_zeros(wav)
             
             wav_norm = wav * (10.0 ** (self.db_norm / 20.0) / np.maximum(0.01, (wav ** 2).mean(axis=0) ** 0.5))
             
