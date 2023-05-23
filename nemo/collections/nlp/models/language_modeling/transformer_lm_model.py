@@ -18,6 +18,7 @@ from typing import Dict, Optional
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torch.utils.data as pt_data
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
@@ -84,6 +85,7 @@ class TransformerLMModel(ModelPT):
             ),
         )
 
+        '''
         self.log_softmax = TokenClassifier(
             hidden_size=self.encoder.hidden_size,
             num_classes=vocab_size,
@@ -92,9 +94,10 @@ class TransformerLMModel(ModelPT):
             dropout=cfg.head.dropout,
             use_transformer_init=cfg.head.use_transformer_init,
         )
+        '''
 
         # tie weights of embedding and softmax matrices
-        self.log_softmax.mlp.layer0.weight = self.encoder.embedding.token_embedding.weight
+        #self.log_softmax.mlp.layer0.weight = self.encoder.embedding.token_embedding.weight
 
         std_init_range = 1 / self.encoder.hidden_size ** 0.5
 
@@ -102,7 +105,7 @@ class TransformerLMModel(ModelPT):
         if not self._cfg.encoder.get('pretrained', False):
             self.encoder.apply(lambda module: transformer_weights_init(module, std_init_range))
 
-        self.log_softmax.apply(lambda module: transformer_weights_init(module, std_init_range))
+        #self.log_softmax.apply(lambda module: transformer_weights_init(module, std_init_range))
 
         self.loss_fn = SmoothedCrossEntropyLoss(pad_id=self.tokenizer.pad_id, label_smoothing=cfg.label_smoothing)
         self.eval_loss_fn = SmoothedCrossEntropyLoss(pad_id=self.tokenizer.pad_id)
@@ -117,7 +120,8 @@ class TransformerLMModel(ModelPT):
         """
 
         hidden_states = self.encoder(input_ids=input_ids, encoder_mask=attention_mask)
-        log_probs = self.log_softmax(hidden_states=hidden_states)
+        #log_probs = self.log_softmax(hidden_states=hidden_states)
+        log_probs = torch.log_softmax(F.linear(hidden_states, self.encoder.embedding.token_embedding.weight), dim=-1)
 
         return log_probs
 

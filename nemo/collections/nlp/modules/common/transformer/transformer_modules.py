@@ -105,43 +105,48 @@ class TransformerEmbedding(nn.Module):
         embedding_dropout: float = 0.0,
         learn_positional_encodings: bool = False,
         padding_idx: int = 0,
+        alibi: bool = False,
     ):
         super().__init__()
 
         self.max_sequence_length = max_sequence_length
         self.learn_positional_encodings = learn_positional_encodings
         self.token_embedding = nn.Embedding(vocab_size, hidden_size, padding_idx=padding_idx)
+        self.alibi = alibi
         if learn_positional_encodings:
             self.position_embedding = nn.Embedding(max_sequence_length, hidden_size)
         else:
             self.position_embedding = FixedPositionalEncoding(hidden_size, max_sequence_length)
         if num_token_types > 0:
             self.token_type_embedding = nn.Embedding(num_token_types, hidden_size)
-        self.layer_norm = nn.LayerNorm(hidden_size, eps=1e-5)
+        #self.layer_norm = nn.LayerNorm(hidden_size, eps=1e-5)
         self.dropout = nn.Dropout(embedding_dropout)
 
     def forward(self, input_ids, token_type_ids=None, start_pos=0):
-        seq_length = input_ids.size(1)
-        # we fail here only with parametric positional embedding. FixedPositionalEncoding automatically extends.
-        if self.learn_positional_encodings and (seq_length > self.max_sequence_length):
-            raise ValueError(
-                f"Input sequence is longer than maximum allowed sequence length for positional encoding. "
-                f"Got {seq_length} and {self.max_sequence_length}"
-            )
-        position_ids = torch.arange(
-            start=start_pos, end=start_pos + seq_length, dtype=torch.long, device=input_ids.device
-        )
-        position_ids = position_ids.unsqueeze(0).repeat(input_ids.size(0), 1)
-
         token_embeddings = self.token_embedding(input_ids)
-        position_embeddings = self.position_embedding(position_ids)
-        embeddings = token_embeddings + position_embeddings
+        
+        if not self.alibi:
+            seq_length = input_ids.size(1)
+            # we fail here only with parametric positional embedding. FixedPositionalEncoding automatically extends.
+            if self.learn_positional_encodings and (seq_length > self.max_sequence_length):
+                raise ValueError(
+                    f"Input sequence is longer than maximum allowed sequence length for positional encoding. "
+                    f"Got {seq_length} and {self.max_sequence_length}"
+                )
+            position_ids = torch.arange(
+                start=start_pos, end=start_pos + seq_length, dtype=torch.long, device=input_ids.device
+            )
+            position_ids = position_ids.unsqueeze(0).repeat(input_ids.size(0), 1)
+            position_embeddings = self.position_embedding(position_ids)
+            embeddings = token_embeddings + position_embeddings
+        else:
+            embeddings = token_embeddings
 
         if token_type_ids is not None:
             token_type_embeddings = self.token_type_embedding(token_type_ids)
             embeddings = embeddings + token_type_embeddings
 
-        embeddings = self.layer_norm(embeddings)
+        #embeddings = self.layer_norm(embeddings)
         embeddings = self.dropout(embeddings)
 
         return embeddings

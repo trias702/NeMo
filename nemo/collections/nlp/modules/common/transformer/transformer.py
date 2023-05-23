@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 import torch
+import torch.nn as nn
 from omegaconf.omegaconf import MISSING
 
 from nemo.collections.nlp.modules.common.decoder_module import DecoderModule
@@ -23,6 +24,7 @@ from nemo.collections.nlp.modules.common.encoder_module import EncoderModule
 from nemo.collections.nlp.modules.common.transformer.transformer_decoders import TransformerDecoder
 from nemo.collections.nlp.modules.common.transformer.transformer_encoders import TransformerEncoder
 from nemo.collections.nlp.modules.common.transformer.transformer_modules import TransformerEmbedding
+from nemo.collections.common.parts import attn_bias_shape
 from nemo.core.classes.common import typecheck
 from nemo.core.classes.exportable import Exportable
 from nemo.core.neural_types import ChannelType, NeuralType
@@ -82,23 +84,44 @@ class TransformerEncoderNM(EncoderModule, Exportable):
         inner_size: int,
         num_attention_heads: int,
         max_sequence_length: int = 512,
-        num_token_types: int = 2,
+        num_token_types: int = 0,
         embedding_dropout: float = 0.0,
         learn_positional_encodings: bool = False,
         ffn_dropout: float = 0.0,
-        attn_score_dropout: float = 0.0,
-        attn_layer_dropout: float = 0.0,
         hidden_act: str = 'relu',
         mask_future: bool = False,
         pre_ln: bool = False,
         pre_ln_final_layer_norm: bool = True,
         padding_idx: int = 0,
+        norm_type: str = 'low_precision_layernorm',
+        attn_score_dropout: float = 0.0,
+        attn_layer_dropout: float = 0.0,
+        attn_alibi: bool = True,
+        attn_alibi_bias_max: int = 8,
+        attn_impl: str = 'torch',
+        attn_type: str = 'multihead_attention',
+        attn_uses_sequence_id: bool = False,
+        attn_clip_qkv = None,
+        attn_prefix_lm: bool = False,
+        attn_softmax_scale = None,
+        no_bias: bool = True,
     ):
         super().__init__()
 
         self._vocab_size = vocab_size
         self._hidden_size = hidden_size
         self._max_sequence_length = max_sequence_length
+        self._attn_impl = attn_impl
+        self._prefix_lm = attn_prefix_lm
+        self._attn_uses_sequence_id = attn_uses_sequence_id
+        self._alibi = attn_alibi
+        self._alibi_bias_max = attn_alibi_bias_max
+        
+        if norm_type.lower() not in NORM_CLASS_REGISTRY.keys():
+            norm_options = ' | '.join(NORM_CLASS_REGISTRY.keys())
+            raise NotImplementedError(f'Requested norm type ({norm_type}) is not implemented within this repo (Options: {norm_options}).')
+
+        norm_class = NORM_CLASS_REGISTRY[norm_type.lower()]
 
         self._embedding = TransformerEmbedding(
             vocab_size=self._vocab_size,
@@ -108,6 +131,7 @@ class TransformerEncoderNM(EncoderModule, Exportable):
             embedding_dropout=embedding_dropout,
             learn_positional_encodings=learn_positional_encodings,
             padding_idx=padding_idx,
+            alibi=self._alibi,
         )
 
         self._encoder = TransformerEncoder(
@@ -123,6 +147,19 @@ class TransformerEncoderNM(EncoderModule, Exportable):
             pre_ln=pre_ln,
             pre_ln_final_layer_norm=pre_ln_final_layer_norm,
         )
+        
+        self._norm_f = norm_class(self._hidden_size)
+        #self.apply(self.param_init_fn)
+        
+        self.is_causal = not self._prefix_lm
+        self._attn_bias_initialized = False
+        self._attn_bias = None
+        self._attn_bias_shape = attn_bias_shape(self._attn_impl, num_attention_heads, self._max_sequence_length, self._alibi, prefix_lm=self._prefix_lm, causal=self.is_causal, use_sequence_id=self._attn_uses_sequence_id)
+        
+        if no_bias:
+            for module in self.modules():
+                if hasattr(module, 'bias') and isinstance(module.bias, nn.Parameter):
+                    module.register_parameter('bias', None)
 
     @typecheck()
     def forward(self, input_ids, encoder_mask):
@@ -161,6 +198,10 @@ class TransformerEncoderNM(EncoderModule, Exportable):
         input_ids = torch.randint(low=0, high=2048, size=sz, device=sample.device)
         encoder_mask = torch.randint(low=0, high=1, size=sz, device=sample.device)
         return tuple([input_ids, encoder_mask])
+    
+    #def param_init_fn(self, module):
+    #    init_fn_name = self.config.init_config['name']
+    #    MODEL_INIT_REGISTRY[init_fn_name](module=module, n_layers=self.config.n_layers, d_model=self.config.d_model, **self.config.init_config)
 
 
 class TransformerDecoderNM(DecoderModule, Exportable):

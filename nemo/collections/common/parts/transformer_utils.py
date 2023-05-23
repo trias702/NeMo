@@ -15,7 +15,7 @@
 import torch
 import torch.nn as nn
 
-__all__ = ['NEG_INF', 'form_attention_mask', 'transformer_weights_init', 'mask_padded_tokens']
+__all__ = ['NEG_INF', 'form_attention_mask', 'transformer_weights_init', 'mask_padded_tokens', 'attn_bias_shape']
 
 NEG_INF = -10000.0
 
@@ -77,3 +77,19 @@ def transformer_weights_init(module, std_init_range=0.02, xavier=True):
 def mask_padded_tokens(tokens, pad_id):
     mask = tokens != pad_id
     return mask
+
+
+def attn_bias_shape(attn_impl, n_heads, seq_len, alibi, prefix_lm, causal, use_sequence_id):
+    if attn_impl == 'flash':
+        return None
+    elif attn_impl in ['torch', 'triton']:
+        if alibi:
+            if (prefix_lm or not causal) or use_sequence_id:
+                return (1, n_heads, seq_len, seq_len)
+            return (1, n_heads, 1, seq_len)
+        elif prefix_lm or use_sequence_id:
+            return (1, 1, seq_len, seq_len)
+        return None
+    else:
+        raise ValueError(f'attn_impl={attn_impl!r} is an invalid setting.')
+
