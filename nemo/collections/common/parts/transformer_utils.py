@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import torch
 import torch.nn as nn
 
-__all__ = ['NEG_INF', 'form_attention_mask', 'transformer_weights_init', 'mask_padded_tokens', 'attn_bias_shape']
+__all__ = ['NEG_INF', 'form_attention_mask', 'transformer_weights_init', 'mask_padded_tokens', 'attn_bias_shape', 'build_attn_bias', 'build_alibi_bias']
 
 NEG_INF = -10000.0
 
@@ -93,3 +94,34 @@ def attn_bias_shape(attn_impl, n_heads, seq_len, alibi, prefix_lm, causal, use_s
     else:
         raise ValueError(f'attn_impl={attn_impl!r} is an invalid setting.')
 
+
+def build_attn_bias(attn_impl, attn_bias, n_heads, seq_len, causal=False, alibi=False, alibi_bias_max=8):
+    if attn_impl == 'flash':
+        return None
+    elif attn_impl in ['torch', 'triton']:
+        if alibi:
+            (device, dtype) = (attn_bias.device, attn_bias.dtype)
+            attn_bias = attn_bias.add(build_alibi_bias(n_heads, seq_len, full=not causal, alibi_bias_max=alibi_bias_max, device=device, dtype=dtype))
+        return attn_bias
+    else:
+        raise ValueError(f'attn_impl={attn_impl!r} is an invalid setting.')
+
+
+def gen_slopes(n_heads, alibi_bias_max=8, device=None):
+    _n_heads = 2 ** math.ceil(math.log2(n_heads))
+    m = torch.arange(1, _n_heads + 1, dtype=torch.float32, device=device)
+    m = m.mul(alibi_bias_max / _n_heads)
+    slopes = 1.0 / torch.pow(2, m)
+    if _n_heads != n_heads:
+        slopes = torch.concat([slopes[1::2], slopes[::2]])[:n_heads]
+    return slopes.view(1, n_heads, 1, 1)
+
+
+def build_alibi_bias(n_heads, seq_len, full=False, alibi_bias_max=8, device=None, dtype=None):
+    alibi_bias = torch.arange(1 - seq_len, 1, dtype=torch.int32, device=device).view(1, 1, 1, seq_len)
+    if full:
+        alibi_bias = alibi_bias - torch.arange(1 - seq_len, 1, dtype=torch.int32, device=device).view(1, 1, seq_len, 1)
+        alibi_bias = alibi_bias.abs().mul(-1)
+    slopes = gen_slopes(n_heads, alibi_bias_max, device=device)
+    alibi_bias = alibi_bias * slopes
+    return alibi_bias.to(dtype=dtype)

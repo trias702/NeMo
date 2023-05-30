@@ -900,11 +900,11 @@ class CoreAttention(MegatronModule):
             # This is actually dropping out entire tokens to attend to, which might
             # seem a bit unusual, but is taken from the original Transformer paper.
 
-            if not self.sequence_parallel:
-                with tensor_parallel.random.get_cuda_rng_tracker().fork():
-                    attention_probs = self.attention_dropout(attention_probs)
-            else:
-                attention_probs = self.attention_dropout(attention_probs)
+            #if not self.sequence_parallel:
+            #    with tensor_parallel.random.get_cuda_rng_tracker().fork():
+            #        attention_probs = self.attention_dropout(attention_probs)
+            #else:
+            attention_probs = self.attention_dropout(attention_probs)
 
             # change view [b * np, sq, sk]
             attention_probs = attention_probs.view(b * np, sq, sk)

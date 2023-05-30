@@ -24,7 +24,7 @@ from nemo.collections.nlp.modules.common.encoder_module import EncoderModule
 from nemo.collections.nlp.modules.common.transformer.transformer_decoders import TransformerDecoder
 from nemo.collections.nlp.modules.common.transformer.transformer_encoders import TransformerEncoder
 from nemo.collections.nlp.modules.common.transformer.transformer_modules import TransformerEmbedding
-from nemo.collections.common.parts import attn_bias_shape
+from nemo.collections.common.parts import transformer_weights_init
 from nemo.core.classes.common import typecheck
 from nemo.core.classes.exportable import Exportable
 from nemo.core.neural_types import ChannelType, NeuralType
@@ -88,7 +88,7 @@ class TransformerEncoderNM(EncoderModule, Exportable):
         embedding_dropout: float = 0.0,
         learn_positional_encodings: bool = False,
         ffn_dropout: float = 0.0,
-        hidden_act: str = 'relu',
+        hidden_act: str = 'gelu',
         mask_future: bool = False,
         pre_ln: bool = False,
         pre_ln_final_layer_norm: bool = True,
@@ -96,32 +96,29 @@ class TransformerEncoderNM(EncoderModule, Exportable):
         norm_type: str = 'low_precision_layernorm',
         attn_score_dropout: float = 0.0,
         attn_layer_dropout: float = 0.0,
-        attn_alibi: bool = True,
+        attn_use_alibi: bool = True,
         attn_alibi_bias_max: int = 8,
         attn_impl: str = 'torch',
         attn_type: str = 'multihead_attention',
-        attn_uses_sequence_id: bool = False,
-        attn_clip_qkv = None,
+        attn_use_sequence_id: bool = False,
+        attn_clip_qkv: Optional[float] = None,
         attn_prefix_lm: bool = False,
-        attn_softmax_scale = None,
+        attn_softmax_scale: Optional[float] = None,
+        attn_qk_ln: bool = False,
+        expansion_ratio: int = 4,
         no_bias: bool = True,
+        embeddings_ln: bool = False,
     ):
         super().__init__()
 
         self._vocab_size = vocab_size
         self._hidden_size = hidden_size
         self._max_sequence_length = max_sequence_length
-        self._attn_impl = attn_impl
-        self._prefix_lm = attn_prefix_lm
-        self._attn_uses_sequence_id = attn_uses_sequence_id
-        self._alibi = attn_alibi
-        self._alibi_bias_max = attn_alibi_bias_max
-        
-        if norm_type.lower() not in NORM_CLASS_REGISTRY.keys():
-            norm_options = ' | '.join(NORM_CLASS_REGISTRY.keys())
-            raise NotImplementedError(f'Requested norm type ({norm_type}) is not implemented within this repo (Options: {norm_options}).')
-
-        norm_class = NORM_CLASS_REGISTRY[norm_type.lower()]
+        #self._attn_impl = attn_impl
+        #self._prefix_lm = attn_prefix_lm
+        #self._attn_uses_sequence_id = attn_uses_sequence_id
+        #self._alibi = attn_alibi
+        #self._alibi_bias_max = attn_alibi_bias_max
 
         self._embedding = TransformerEmbedding(
             vocab_size=self._vocab_size,
@@ -131,41 +128,48 @@ class TransformerEncoderNM(EncoderModule, Exportable):
             embedding_dropout=embedding_dropout,
             learn_positional_encodings=learn_positional_encodings,
             padding_idx=padding_idx,
-            alibi=self._alibi,
+            alibi=attn_use_alibi,
+            embeddings_ln=embeddings_ln,
         )
 
         self._encoder = TransformerEncoder(
-            hidden_size=self._hidden_size,
             num_layers=num_layers,
-            inner_size=inner_size,
+            hidden_size=hidden_size,
             num_attention_heads=num_attention_heads,
-            ffn_dropout=ffn_dropout,
-            attn_score_dropout=attn_score_dropout,
             attn_layer_dropout=attn_layer_dropout,
+            ffn_dropout=ffn_dropout,
+            expansion_ratio=expansion_ratio,
+            max_sequence_length=max_sequence_length,
+            alibi_bias_max=attn_alibi_bias_max,
             hidden_act=hidden_act,
-            mask_future=mask_future,
+            norm_type=norm_type,
+            attn_type=attn_type,
+            attn_impl=attn_impl,
             pre_ln=pre_ln,
             pre_ln_final_layer_norm=pre_ln_final_layer_norm,
+            qk_ln=attn_qk_ln,
+            prefix_lm=attn_prefix_lm,
+            use_alibi=attn_use_alibi,
+            use_sequence_id=attn_use_sequence_id,
+            clip_qkv=attn_clip_qkv,
+            softmax_scale=attn_softmax_scale,
         )
         
-        self._norm_f = norm_class(self._hidden_size)
-        #self.apply(self.param_init_fn)
-        
-        self.is_causal = not self._prefix_lm
-        self._attn_bias_initialized = False
-        self._attn_bias = None
-        self._attn_bias_shape = attn_bias_shape(self._attn_impl, num_attention_heads, self._max_sequence_length, self._alibi, prefix_lm=self._prefix_lm, causal=self.is_causal, use_sequence_id=self._attn_uses_sequence_id)
+        std_init_range = 1 / hidden_size ** 0.5
+        self.apply(lambda module: transformer_weights_init(module, std_init_range))
         
         if no_bias:
             for module in self.modules():
                 if hasattr(module, 'bias') and isinstance(module.bias, nn.Parameter):
                     module.register_parameter('bias', None)
 
-    @typecheck()
-    def forward(self, input_ids, encoder_mask):
-        embeddings = self._embedding(input_ids=input_ids)
-        encoder_hidden_states = self._encoder(encoder_states=embeddings, encoder_mask=encoder_mask)
-        return encoder_hidden_states
+    #@typecheck()
+    def forward(self, input_ids, encoder_mask=None, past_key_values=None, prefix_mask: Optional[torch.ByteTensor]=None, sequence_id: Optional[torch.LongTensor]=None, output_hidden_states=False, use_cache=False):
+        
+        embeddings = self._embedding(input_ids=input_ids, token_type_ids=None, start_pos=0, attention_mask=encoder_mask)
+        encoder_hidden_states, past_key_values, all_hidden_states = self._encoder(x=embeddings, attention_mask=encoder_mask, past_key_values=past_key_values, prefix_mask=prefix_mask, sequence_id=sequence_id, output_hidden_states=output_hidden_states, use_cache=use_cache)
+        
+        return encoder_hidden_states, past_key_values, all_hidden_states
 
     @property
     def hidden_size(self):

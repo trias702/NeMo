@@ -28,7 +28,7 @@ from nemo.collections.common.metrics import GlobalAverageLossMetric
 from nemo.collections.common.parts import transformer_weights_init
 from nemo.collections.nlp.data import SentenceDataset, TarredSentenceDataset
 from nemo.collections.nlp.metrics import SequencePerplexity
-from nemo.collections.nlp.modules.common import TokenClassifier
+#from nemo.collections.nlp.modules.common import TokenClassifier
 from nemo.collections.nlp.modules.common.lm_utils import get_transformer
 from nemo.collections.nlp.modules.common.tokenizer_utils import get_tokenizer
 from nemo.core.classes.common import typecheck
@@ -60,6 +60,8 @@ class TransformerLMModel(ModelPT):
             tokenizer_model=cfg.tokenizer.get("tokenizer_model", None),
             vocab_file=cfg.tokenizer.get("vocab_file", None),
             bpe_dropout=cfg.tokenizer.get("bpe_dropout", 0.0),
+            use_fast=cfg.tokenizer.get("use_fast", False),
+            special_tokens=cfg.tokenizer.get("special_tokens", None),
         )
 
         # init superclass
@@ -70,7 +72,7 @@ class TransformerLMModel(ModelPT):
 
         # encoder from NeMo, Megatron-LM, or HuggingFace
         encoder_cfg_dict = OmegaConf.to_container(cfg.get('encoder'))
-        encoder_cfg_dict['vocab_size'] = vocab_size
+        #encoder_cfg_dict['vocab_size'] = vocab_size
         library = encoder_cfg_dict.pop('library', 'nemo')
         model_name = encoder_cfg_dict.pop('model_name', None)
         pretrained = encoder_cfg_dict.pop('pretrained', False)
@@ -99,11 +101,11 @@ class TransformerLMModel(ModelPT):
         # tie weights of embedding and softmax matrices
         #self.log_softmax.mlp.layer0.weight = self.encoder.embedding.token_embedding.weight
 
-        std_init_range = 1 / self.encoder.hidden_size ** 0.5
+        #std_init_range = 1 / self.encoder.hidden_size ** 0.5
 
         # initialize weights if not using pretrained encoder
-        if not self._cfg.encoder.get('pretrained', False):
-            self.encoder.apply(lambda module: transformer_weights_init(module, std_init_range))
+        #if not self._cfg.encoder.get('pretrained', False):
+        #    self.encoder.apply(lambda module: transformer_weights_init(module, std_init_range))
 
         #self.log_softmax.apply(lambda module: transformer_weights_init(module, std_init_range))
 
@@ -112,14 +114,14 @@ class TransformerLMModel(ModelPT):
         self.eval_loss = GlobalAverageLossMetric(dist_sync_on_step=False, take_avg_loss=True)
         self.eval_ppl = SequencePerplexity()
 
-    @typecheck()
-    def forward(self, input_ids, attention_mask):
+    #@typecheck()
+    def forward(self, input_ids, attention_mask=None, past_key_values=None, prefix_mask: Optional[torch.ByteTensor]=None, sequence_id: Optional[torch.LongTensor]=None, output_hidden_states: Optional[bool]=False, use_cache: Optional[bool]=False):
         """
         No special modification required for Lightning, define it as you normally would
         in the `nn.Module` in vanilla PyTorch.
         """
 
-        hidden_states = self.encoder(input_ids=input_ids, encoder_mask=attention_mask)
+        hidden_states, *_ = self.encoder(input_ids=input_ids, encoder_mask=attention_mask, past_key_values=past_key_values, prefix_mask=prefix_mask, sequence_id=sequence_id, output_hidden_states=output_hidden_states, use_cache=use_cache)
         #log_probs = self.log_softmax(hidden_states=hidden_states)
         log_probs = torch.log_softmax(F.linear(hidden_states, self.encoder.embedding.token_embedding.weight), dim=-1)
 
@@ -196,20 +198,20 @@ class TransformerLMModel(ModelPT):
         self.eval_epoch_end(outputs, 'test')
 
     def setup_tokenizer(
-        self, tokenizer_name=None, tokenizer_model=None, vocab_file=None, bpe_dropout=0.0,
+        self, tokenizer_name=None, tokenizer_model=None, vocab_file=None, bpe_dropout=0.0, use_fast=False, special_tokens=None
     ):
 
-        supported_tokenizers = ['yttm', 'huggingface', 'sentencepiece', 'word']
-        if tokenizer_name not in supported_tokenizers:
-            raise NotImplementedError(f"Currently we only support tokenizers in {supported_tokenizers}.")
+        #supported_tokenizers = ['yttm', 'huggingface', 'sentencepiece', 'word']
+        #if tokenizer_name not in supported_tokenizers:
+        #    raise NotImplementedError(f"Currently we only support tokenizers in {supported_tokenizers}.")
 
         self.tokenizer = get_tokenizer(
             tokenizer_name=tokenizer_name,
             tokenizer_model=self.register_artifact("cfg.tokenizer.tokenizer_model", tokenizer_model),
             vocab_file=vocab_file,
             bpe_dropout=bpe_dropout,
-            special_tokens=None,
-            use_fast=False,
+            special_tokens=special_tokens,
+            use_fast=use_fast,
         )
 
     def setup_training_data(self, train_data_config: Optional[DictConfig]):

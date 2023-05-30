@@ -566,7 +566,7 @@ class TransformerLanguageModel(MegatronModule, adapter_mixins.AdapterModuleMixin
                 bidirectional=encoder_attn_mask_type != AttnMaskType.causal,
                 num_attention_heads=num_attention_heads,
                 layer_type=LayerType.encoder,
-                num_attention_heads_alibi=None,
+                num_attention_heads_alibi=8,
                 max_seq_len=max_position_embeddings,
             )
 
@@ -757,6 +757,7 @@ class TransformerLanguageModel(MegatronModule, adapter_mixins.AdapterModuleMixin
             pass
 
         # enc_attn_mask: [1, 1, s, s]
+        print('ENCODER_INPUT: ', encoder_input, flush=True)
 
         rotary_pos_emb = None
         encoder_self_attention_relative_position_bias = None
@@ -786,6 +787,7 @@ class TransformerLanguageModel(MegatronModule, adapter_mixins.AdapterModuleMixin
             encoder_self_attention_relative_position_bias = self.encoder_relative_position_embedding(
                 query_seq_length=enc_seq_length, key_seq_length=enc_seq_length,
             )
+            print('ALIBI BIAS: ', encoder_self_attention_relative_position_bias, flush=True)
 
         # encoder.
         if enc_hidden_states is None:
