@@ -485,7 +485,7 @@ class ParallelTransformerLayer_(MegatronModule, adapter_mixins.AdapterModuleMixi
         cross_attention_relative_position_bias=None,
         checkpoint_core_attention=False,
     ):
-        print('ParaTransformerLayer_Entry_hidden_states: ', hidden_states, flush=True)
+        #if globals()['DEBUG']: print('ParaTransformerLayer_Entry_hidden_states: ', hidden_states, flush=False)
         # Self attention.
         if rotary_pos_emb is not None:
             # self attention pos_emb is (q, q)
@@ -506,7 +506,8 @@ class ParallelTransformerLayer_(MegatronModule, adapter_mixins.AdapterModuleMixi
             # Layer norm at the beginning of the transformer layer.
             if self.transformer_block_type in ['pre_ln', 'normformer']:
                 hidden_states = self.input_layernorm(hidden_states)
-            print('ParaTransformerLayer_pre_ln_hidden_states: ', hidden_states, flush=True)
+            #if globals()['DEBUG']: print('ParaTransformerLayer_post_pre_ln_hidden_states: ', hidden_states, flush=False)
+            #if globals()['DEBUG']: print('ParaTransformerLayer_rel_attn_bias: ', self_attention_relative_position_bias, flush=True)
             attention_output, attention_bias = self.self_attention(
                 hidden_states,
                 attention_mask,
@@ -1178,6 +1179,8 @@ class ParallelTransformer(MegatronModule):
                 self.final_layernorm = LayerNorm1P(
                     hidden_size, layernorm_epsilon, sequence_parallel_enabled=sequence_parallel
                 )
+            elif normalization == 'low_precision_layernorm':
+                self.final_layernorm = LPLayerNorm(hidden_size, layernorm_epsilon)
             else:
                 self.final_layernorm = MixedFusedRMSNorm(hidden_size, layernorm_epsilon)
             if not bias:
@@ -1552,12 +1555,14 @@ class ParallelTransformer(MegatronModule):
                 self.is_first_microbatch = False
 
         output = hidden_states
+        #print('final_output: ', output)
 
         # Final layer norm.
         if self.post_process:
             # only apply the final_layernorm for pre-ln
             if self.transformer_block_type != 'post_ln':
                 output = self.final_layernorm(hidden_states)
+                #print('final_output_post_final_ln: ', output)
 
         if get_key_value:
             output = [output, presents]

@@ -19,7 +19,7 @@ import torch
 
 __all__ = ['ALiBiRelativePositionEmbedding']
 
-'''
+
 def get_slopes(n):
     def get_slopes_power_of_2(n):
         start = 2 ** (-(2 ** -(math.log2(n) - 3)))
@@ -46,23 +46,17 @@ def build_slopes(num_attention_heads, num_attention_heads_alibi):
         get_slopes(num_attention_heads_alibi) + [0] * (num_attention_heads - num_attention_heads_alibi)
     ).cuda()
     return slopes.unsqueeze(-1).unsqueeze(-1)
-'''
-
-def build_slopes(n_heads, alibi_bias_max=8, device=None):
-    _n_heads = 2 ** math.ceil(math.log2(n_heads))
-    m = torch.arange(1, _n_heads + 1, dtype=torch.float32, device=device)
-    m = m.mul(alibi_bias_max / _n_heads)
-    slopes = 1.0 / torch.pow(2, m)
-    if _n_heads != n_heads:
-        slopes = torch.concat([slopes[1::2], slopes[::2]])[:n_heads]
-    return slopes.view(n_heads, 1, 1).cuda()
 
 
-def build_relative_position(query_length, key_length, full=True):
-    relative_position = torch.arange(1 - query_length, 1)[None, :].cuda().mul(-1)  # (1, max_seq_len)
+def build_relative_position(max_seq_len, full=True):
+    """
+    full=True:  shape (max_seq_len, max_seq_len)
+    full=False: shape (max_seq_len)
+    """
+    relative_position = torch.arange(1 - max_seq_len, 1)[None, :].cuda().mul(-1)  # (1, max_seq_len)
 
     if full:
-        memory_position = torch.arange(1 - key_length, 1)[:, None].cuda().mul(-1)
+        memory_position = torch.arange(1 - max_seq_len, 1)[:, None].cuda().mul(-1)
         relative_position = torch.abs(memory_position - relative_position)  # (max_seq_len, max_seq_len)
 
     return relative_position
@@ -110,10 +104,8 @@ class ALiBiRelativePositionEmbedding(torch.nn.Module):
         self.slopes = build_slopes(num_attention_heads, num_attention_heads_alibi)
         # cache the relative position bias. shape (num_attention_heads, max_seq_len, max_seq_len)
         # if we use causal attention (not bidrectional), we can use singleton relative position
-        self.relative_position = -1 * (
-            build_relative_position(max_seq_len, max_seq_len, full=bidirectional)
-            .unsqueeze(0)
-            .expand(num_attention_heads, -1, -1)
+        self.relative_position = (
+            build_relative_position(max_seq_len, full=bidirectional).unsqueeze(0).expand(num_attention_heads, -1, -1)
         )
 
     def forward(self, query_seq_length, key_seq_length):
@@ -121,7 +113,7 @@ class ALiBiRelativePositionEmbedding(torch.nn.Module):
         max_seq_len = max(query_seq_length, key_seq_length)
         if max_seq_len > self.max_seq_len:
             relative_position = (
-                build_relative_position(max_seq_len, max_seq_len, full=self.bidirectional)
+                build_relative_position(max_seq_len, full=self.bidirectional)
                 .unsqueeze(0)
                 .expand(self.num_attention_heads, -1, -1)
             )
@@ -130,8 +122,8 @@ class ALiBiRelativePositionEmbedding(torch.nn.Module):
         # shape (num_attention_heads, query_seq_length, key_seq_length)
         relative_position = relative_position[:, -query_seq_length:, -key_seq_length:]
         # if not bidirectional, mask out the future positions
-        #if not self.bidirectional:
+        # if not self.bidirectional:
         #    relative_position = torch.tril(relative_position)
 
         # shape (1, num_heads, query_length, key_length)
-        return relative_position.unsqueeze(0) * self.slopes
+        return -relative_position.unsqueeze(0) * self.slopes

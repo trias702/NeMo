@@ -393,6 +393,8 @@ class ParallelAttention(MegatronModule, adapter_mixins.AdapterModuleMixin):
         if self.attention_type == AttnType.self_attn:
             # Attention heads [sq, b, h] --> [sq, b, (np * 3 * hn)]
             mixed_x_layer, _ = self.query_key_value(hidden_states)
+            #if debug: print('mixed_x_layer_shape: ', mixed_x_layer.shape, flush=False)
+            #if debug: print('mixed_x_layer: ', mixed_x_layer, flush=False)
             if self.is_adapter_available():
                 lora_kqv_adapter = self.get_adapter_module(AdapterName.LORA_KQV_ADAPTER)
                 if lora_kqv_adapter:
@@ -408,10 +410,15 @@ class ParallelAttention(MegatronModule, adapter_mixins.AdapterModuleMixin):
                 mixed_x_layer = self._transpose_last_dim(mixed_x_layer, 3, True)
             mixed_x_layer = mixed_x_layer.view(*new_tensor_shape)
 
+            #if debug: print('mixed_x_layer_shape1: ', mixed_x_layer.shape, flush=False)
+            #if debug: print('mixed_x_layer1: ', mixed_x_layer, flush=True)
             # [sq, b, np, 3 * hn] --> 3 [sq, b, np, hn]
             (query_layer, key_layer, value_layer) = tensor_parallel.split_tensor_along_last_dim(
                 mixed_x_layer, 3, contiguous_split_chunks=True
             )
+            #if debug: print('query_layer: ', query_layer, flush=False)
+            #if debug: print('key_layer: ', key_layer, flush=False)
+            #if debug: print('value_layer: ', value_layer, flush=True)
         else:
             # Attention heads [sk, b, h] --> [sk, b, (np * 2 * hn)]
             mixed_kv_layer, _ = self.key_value(encoder_output)
@@ -855,6 +862,12 @@ class CoreAttention(MegatronModule):
             query_layer = rearrange(query_layer, 'sq b np hn -> (b np) sq hn')
             key_layer = rearrange(key_layer, 'sk b np hn -> (b np) hn sk')
             value_layer = rearrange(value_layer, 'sv b np hn -> (b np) sv hn')
+        #if debug: print('query_layer_shape: ', query_layer.shape, flush=False)
+        #if debug: print('key_layer_shape: ', key_layer.shape, flush=False)
+        #if debug: print('value_layer_shape: ', value_layer.shape, flush=False)
+        #if debug: print('query_layer: ', query_layer, flush=False)
+        #if debug: print('key_layer: ', key_layer, flush=False)
+        #if debug: print('value_layer: ', value_layer, flush=False)
 
         # ==================================================
         # Get context_layer [b, np, sq, hn]
@@ -881,6 +894,7 @@ class CoreAttention(MegatronModule):
                 device=torch.cuda.current_device(),
             )
 
+            #if debug: print('norm_factor: ', self.norm_factor, flush=False)
             matmul_result = torch.baddbmm(
                 matmul_input_buffer,
                 query_layer,
@@ -891,6 +905,7 @@ class CoreAttention(MegatronModule):
 
             # change view to [b, np, sq, sk]
             attention_scores = matmul_result.view(b, np, sq, sk)
+            #if debug: print('ATTN WEIGHT: ', attention_scores, flush=True)
 
             if relative_position_bias is not None:
                 attention_scores += relative_position_bias
