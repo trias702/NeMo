@@ -331,24 +331,27 @@ class CodeSwitchedDataset(IterableDataset):
         datasets: dict,
         lang_probs: Optional[dict] = None,
         shuffle: bool = True,
-        min_duration: int = 16,
+        min_duration: int = 4,
         max_duration: int = 20,
-        min_monolingual: float = 0.2,
+        min_monolingual: float = 0.3,
         db_norm: float = -25.0,
-        pause_start: int = 20,
-        pause_join: int = 80,
-        pause_end: int = 20,
+        pause_start: int = 0,
+        pause_join: int = 0,
+        pause_end: int = 0,
         sampling_scales: Optional[Union[float, List[float]]] = None,
         seed: Optional[int] = None,
         global_rank: int = 0,
         world_size: int = 1,
         pure_random: bool = False,
-        force_monochannel: bool = False,
+        force_monochannel: bool = True,
         infinity_mode: bool = False,
         sample_rate: int = 16000,
         augmentor: Optional['AudioAugmentor'] = None,
     ):
         super().__init__()
+        
+        if len(datasets) == 0:
+            raise ValueError("CodeSwitchedDataset must receive a non-zero length datasets dict object")
 
         self.datasets = datasets
         self.langs = list(datasets.keys())
@@ -416,12 +419,14 @@ class CodeSwitchedDataset(IterableDataset):
         #self.collate_fn = self.datasets[self.langs[0]].collate_fn
         if hasattr(self.datasets[self.langs[0]], 'collate_fn'):
             self.collate_fn = self.datasets[self.langs[0]].collate_fn
-        elif hasattr(self.datasets[self.langs[0]].datasets[0], 'collate_fn'):
+        elif hasattr(self.datasets[self.langs[0]], 'datasets') and isinstance(self.datasets[self.langs[0]].datasets, list) and len(self.datasets[self.langs[0]].datasets) > 0 and hasattr(self.datasets[self.langs[0]].datasets[0], 'collate_fn'):
             # support datasets that are lists of entries
             self.collate_fn = self.datasets[self.langs[0]].datasets[0].collate_fn
-        else:
+        elif hasattr(self.datasets[self.langs[0]], 'datasets') and isinstance(self.datasets[self.langs[0]].datasets, list) and len(self.datasets[self.langs[0]].datasets) > 0 and hasattr(self.datasets[self.langs[0]].datasets[0], 'datasets') and isinstance(self.datasets[self.langs[0]].datasets[0].datasets, list) and len(self.datasets[self.langs[0]].datasets[0].datasets) > 0 and hasattr(self.datasets[self.langs[0]].datasets[0].datasets[0], 'collate_fn'):
             # support datasets that are lists of lists
             self.collate_fn = self.datasets[self.langs[0]].datasets[0].datasets[0].collate_fn
+        else:
+            raise ValueError("CodeSwitchedDataset could not locate a valid dataset collate_fn to bind to")
         
     def get_iterable_by_lang(self, lang):
         dataset = self.datasets[lang]
