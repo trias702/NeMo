@@ -32,7 +32,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from pytorch_lightning.callbacks import Callback, ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks.timer import Interval, Timer
-from pytorch_lightning.loggers import MLFlowLogger, TensorBoardLogger, WandbLogger
+from pytorch_lightning.loggers import MLFlowLogger, WandbLogger
 from pytorch_lightning.loops import TrainingEpochLoop
 from pytorch_lightning.strategies.ddp import DDPStrategy
 
@@ -720,9 +720,9 @@ def get_log_dir(
             elif is_global_rank_zero():
                 if use_datetime_version:
                     version = time.strftime('%Y-%m-%d_%H-%M-%S')
-                else:
-                    tensorboard_logger = TensorBoardLogger(save_dir=Path(_exp_dir), name=name, version=version)
-                    version = f"version_{tensorboard_logger.version}"
+                #else:
+                #    tensorboard_logger = TensorBoardLogger(save_dir=Path(_exp_dir), name=name, version=version)
+                #    version = f"version_{tensorboard_logger.version}"
                 os.environ[NEMO_ENV_VARNAME_VERSION] = "" if version is None else version
 
     log_dir = Path(_exp_dir) / Path(str(name)) / Path("" if version is None else str(version))
@@ -792,9 +792,9 @@ def configure_loggers(
                 "You cannot pass `log_dir` as part of `summary_writer_kwargs`. `log_dir` is handled by lightning's "
                 "TensorBoardLogger logger."
             )
-        tensorboard_logger = TensorBoardLogger(save_dir=exp_dir, name=name, version=version, **summary_writer_kwargs)
-        logger_list.append(tensorboard_logger)
-        logging.info("TensorboardLogger has been set up")
+        #tensorboard_logger = TensorBoardLogger(save_dir=exp_dir, name=name, version=version, **summary_writer_kwargs)
+        #logger_list.append(tensorboard_logger)
+        #logging.info("TensorboardLogger has been set up")
 
     if create_wandb_logger:
         if wandb_kwargs is None:
