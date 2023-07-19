@@ -161,7 +161,7 @@ class Exportable(ABC):
 
         # Pytorch's default opset version is too low, using reasonable latest one
         if onnx_opset_version is None:
-            onnx_opset_version = 13
+            onnx_opset_version = 16
 
         try:
             # Disable typechecks
