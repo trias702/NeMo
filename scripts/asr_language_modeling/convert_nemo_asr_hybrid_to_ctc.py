@@ -60,21 +60,23 @@ if __name__ == '__main__':
         BPE = True
         ctc_class = EncDecCTCModelBPE
     
+    hybrid_model_cfg = OmegaConf.to_container(hybrid_model.cfg)
+    
     new_cfg = {}
-    new_cfg['sample_rate'] = hybrid_model.cfg.sample_rate
-    new_cfg['log_prediction'] = hybrid_model.cfg.log_prediction
-    new_cfg['ctc_reduction'] = hybrid_model.cfg.aux_ctc.ctc_reduction
-    new_cfg['skip_nan_grad'] = hybrid_model.cfg.skip_nan_grad
+    new_cfg['sample_rate'] = hybrid_model_cfg['sample_rate']
+    new_cfg['log_prediction'] = hybrid_model_cfg['log_prediction']
+    new_cfg['ctc_reduction'] = hybrid_model_cfg['aux_ctc']['ctc_reduction']
+    new_cfg['skip_nan_grad'] = hybrid_model_cfg['skip_nan_grad']
     if BPE:
-        new_cfg['tokenizer'] = OmegaConf.to_container(hybrid_model.cfg.tokenizer)
-    new_cfg['preprocessor'] = OmegaConf.to_container(hybrid_model.cfg.preprocessor)
-    new_cfg['spec_augment'] = OmegaConf.to_container(hybrid_model.cfg.spec_augment)
-    new_cfg['encoder'] = OmegaConf.to_container(hybrid_model.cfg.encoder)
-    new_cfg['decoder'] = OmegaConf.to_container(hybrid_model.cfg.aux_ctc.decoder)
-    new_cfg['interctc'] = OmegaConf.to_container(hybrid_model.cfg.interctc)
-    new_cfg['optim'] = OmegaConf.to_container(hybrid_model.cfg.optim)
-    new_cfg['train_ds'] = OmegaConf.to_container(hybrid_model.cfg.train_ds)
-    new_cfg['validation_ds'] = OmegaConf.to_container(hybrid_model.cfg.validation_ds)
+        new_cfg['tokenizer'] = hybrid_model_cfg['tokenizer']
+    new_cfg['preprocessor'] = hybrid_model_cfg['preprocessor']
+    new_cfg['spec_augment'] = hybrid_model_cfg['spec_augment']
+    new_cfg['encoder'] = hybrid_model_cfg['encoder']
+    new_cfg['decoder'] = hybrid_model_cfg['aux_ctc']['decoder']
+    new_cfg['interctc'] = hybrid_model_cfg['interctc']
+    new_cfg['optim'] = hybrid_model_cfg['optim']
+    new_cfg['train_ds'] = hybrid_model_cfg['train_ds']
+    new_cfg['validation_ds'] = hybrid_model_cfg['validation_ds']
     
     new_cfg_oc = OmegaConf.create(new_cfg)
     
