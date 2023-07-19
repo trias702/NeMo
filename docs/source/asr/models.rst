@@ -142,11 +142,19 @@ With local attention, inference is possible on audios >1 hrs (256 subsampling ch
 
 Fast Conformer models were trained using CosineAnnealing (instead of Noam) as the scheduler.
 
-You may find the example CTC config at 
+You may find the example CTC config at
 ``<NeMo_git_root>/examples/asr/conf/fastconformer/fast-conformer_ctc_bpe.yaml`` and
 the transducer config at ``<NeMo_git_root>/examples/asr/conf/fastconformer/fast-conformer_transducer_bpe.yaml``
 
 Note that both configs are subword-based (BPE).
+
+You can also train these models with longformer-style attention (https://arxiv.org/abs/2004.05150) using the following configs: CTC config at
+``<NeMo_git_root>/examples/asr/conf/fastconformer/fast-conformer-long_ctc_bpe.yaml`` and transducer config at ``<NeMo_git_root>/examples/asr/conf/fastconformer/fast-conformer-long_transducer_bpe.yaml``
+This allows using the model on longer audio (up to 70 minutes with Fast Conformer). Note that the Fast Conformer checkpoints
+can be used with limited context attention even if trained with full context. However, if you also want to use global tokens,
+which help aggregate information from outside the limited context, then training is required.
+
+You may find more examples under ``<NeMo_git_root>/examples/asr/conf/fastconformer/``.
 
 Cache-aware Streaming Conformer
 -------------------------------
@@ -204,6 +212,13 @@ at ``<NeMo_git_root>/examples/asr/conf/conformer/streaming/conformer_ctc_bpe.yam
 To simulate cache-aware streaming, you may use the script at ``<NeMo_git_root>/examples/asr/asr_cache_aware_streaming/speech_to_text_cache_aware_streaming_infer.py``. It can simulate streaming in single stream or multi-stream mode (in batches) for an ASR model.
 This script can be used for models trained offline with full-context but the accuracy would not be great unless the chunk size is large enough which would result in high latency.
 It is recommended to train a model in streaming model with limited context for this script. More info can be found in the script.
+
+You may find FastConformer variants of cache-aware streaming models under ``<NeMo_git_root>/examples/asr/conf/fastconformer/``.
+
+Note cache-aware streaming models are being exported without caching support by default.
+To include caching support, `model.set_export_config({'cache_support' : 'True'})` should be called before export.
+Or, if ``<NeMo_git_root>/scripts/export.py`` is being used:
+`python export.py cache_aware_conformer.nemo cache_aware_conformer.onnx --config cache_support=True`
 
 .. _LSTM-Transducer_model:
 
@@ -276,6 +291,98 @@ These examples can be used to train any Hybrid ASR model like Conformer, Citrine
 You may find the example config files of Conformer variant of such hybrid models with character-based encoding at
 ``<NeMo_git_root>/examples/asr/conf/conformer/hybrid_transducer_ctc/conformer_hybrid_transducer_ctc_char.yaml`` and
 with sub-word encoding at ``<NeMo_git_root>/examples/asr/conf/conformer/hybrid_transducer_ctc/conformer_hybrid_transducer_ctc_bpe.yaml``.
+
+Similar example configs for FastConformer variants of Hybrid models can be found here:
+``<NeMo_git_root>/examples/asr/conf/fastconformer/hybrid_transducer_ctc/``
+``<NeMo_git_root>/examples/asr/conf/fastconformer/hybrid_cache_aware_streaming/``
+
+Note Hybrid models are being exported as RNNT (encoder and decoder+joint parts) by default.
+To export as CTC (single encoder+decoder graph), `model.set_export_config({'decoder_type' : 'ctc'})` should be called before export.
+Or, if ``<NeMo_git_root>/scripts/export.py`` is being used:
+`python export.py hybrid_transducer.nemo hybrid_transducer.onnx --config decoder_type=ctc`
+
+.. _Conformer-HAT_model:
+
+Conformer-HAT (Hybrid Autoregressive Transducer)
+------------------------------------------------
+Conformer HAT model (do not confuse it with Hybrid-Transducer-CTC) is a modification of Conformer-Transducer model based on `Google paper <https://arxiv.org/abs/2003.07705>`_.
+The main idea is to separate labels and blank score predictions, which allows to estimate the internal LM probabilities during decoding.
+When external LM is available for inference, the internal LM can be subtracted from HAT model prediction in beamsearch decoding to improve external LM efficiency.
+It can be helpful in the case of text-only adaptation for new domains.
+
+The only difference from the standard Conformer-Transducer model (RNNT) is the use of `"HATJiont" <https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/asr/modules/hybrid_autoregressive_transducer.py#L39>`_
+class (instead of "RNNTJoint") for joint module. The all HAT logic is implemented in the "HATJiont" class.
+
+    .. image:: images/hat.png
+        :align: center
+        :alt: HAT Model
+        :scale: 50%
+
+You may find the example config files of Conformer-HAT model with character-based encoding at
+``<NeMo_git_root>/examples/asr/conf/conformer/hat/conformer_hat_char.yaml`` and
+with sub-word encoding at ``<NeMo_git_root>/examples/asr/conf/conformer/hat/conformer_hat_bpe.yaml``.
+
+By default, the decoding for HAT model works in the same way as for Conformer-Transducer.
+In the case of external ngram LM fusion you can use ``<NeMo_git_root>/scripts/asr_language_modeling/ngram_lm/eval_beamsearch_ngram_transducer.py``.
+To enable HAT internal LM subtraction set ``hat_subtract_ilm=True`` and find more appropriate couple of ``beam_alpha`` and ``hat_ilm_weight`` values in terms of the best recognition accuracy.
+
+
+.. _Hybrid-ASR-TTS_model:
+
+Hybrid ASR-TTS Model
+--------------------
+
+Hybrid ASR-TTS Model (``ASRWithTTSModel``) is a transparent wrapper for the ASR model with a frozen pretrained text-to-spectrogram model. The approach is described in the paper
+`Text-only domain adaptation for end-to-end ASR using integrated text-to-mel-spectrogram generator <https://arxiv.org/abs/2302.14036>`_.
+This allows using text-only data for training and finetuning, mixing it with audio-text pairs if necessary.
+
+The model consists of three models:
+
+* ASR model (``EncDecCTCModelBPE`` or ``EncDecRNNTBPEModel``)
+* Frozen TTS Mel Spectrogram Generator (currently, only :ref:`FastPitch <FastPitch_model>` model is supported)
+* Optional frozen :ref:`Spectrogram Enhancer model <SpectrogramEnhancer_model>` model trained to mitigate mismatch between real and generated mel spectrogram
+
+    .. image:: images/hybrid_asr_tts_model.png
+        :align: center
+        :alt: Hybrid ASR-TTS Model
+        :scale: 50%
+
+For the detailed information see:
+
+* :ref:`Text-only dataset <Hybrid-ASR-TTS_model__Text-Only-Data>` preparation
+* :ref:`Configs and training <Hybrid-ASR-TTS_model__Config>`
+
+
+.. _Confidence-Ensembles:
+
+Confidence-based Ensembles
+--------------------------
+
+Confidence-based ensemble is a simple way to combine multiple models into a single system by only retaining the
+output of the most confident model. Below is a schematic illustration of how such ensembles work.
+
+    .. image:: https://github.com/NVIDIA/NeMo/releases/download/v1.19.0/conf-ensembles-overview.png
+        :align: center
+        :alt: confidence-based ensembles
+        :scale: 50%
+
+For more details about this model, see the `paper <https://arxiv.org/abs/2306.15824>`_
+or read our `tutorial <https://colab.research.google.com/github/NVIDIA/NeMo/blob/stable/tutorials/asr/Confidence_Ensembles.ipynb>`_.
+
+NeMo support Confidence-based Ensembles through the
+:ref:`nemo.collections.asr.models.confidence_ensembles.ConfidenceEnsembleModel <confidence-ensembles-api>` class.
+
+A typical workflow to create and use the ensemble is like this
+
+1. Run `scripts/confidence_ensembles/build_ensemble.py <https://github.com/NVIDIA/NeMo/blob/main/scripts/confidence_ensembles/build_ensemble.py>`_
+   script to create ensemble from existing models. See the documentation inside the script for usage examples
+   and description of all the supported functionality.
+2. The script outputs a checkpoint that combines all the models in an ensemble. It can be directly used to transcribe
+   speech by calling ``.trascribe()`` method or using
+   `examples/asr/transcribe_speech.py <https://github.com/NVIDIA/NeMo/blob/main/examples/asr/transcribe_speech.py>`_.
+
+Note that the ensemble cannot be modified after construction (e.g. it does not support finetuning) and only
+transcribe functionality is supported (e.g., ``.forward()`` is not properly defined).
 
 
 References

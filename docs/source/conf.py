@@ -28,7 +28,6 @@ import sphinx_book_theme
 
 sys.path.insert(0, os.path.abspath("../.."))
 sys.path.insert(0, os.path.abspath("../../nemo"))
-sys.path.insert(0, os.path.abspath("../../nemo_text_processing"))
 
 from package_info import __version__
 
@@ -47,7 +46,6 @@ autodoc_mock_imports = [
     'hydra',  # hydra-core in requirements, hydra during import
     'dateutil',  # part of core python
     'transformers.tokenization_bert',  # has ., troublesome for this regex
-    'megatron',  # megatron-lm in requirements, megatron in import
     'sklearn',  # scikit_learn in requirements, sklearn in import
     'nemo_text_processing.inverse_text_normalization',  # Not installed automatically
     'nemo_text_processing.text_normalization',  # Not installed automatically
@@ -55,10 +53,13 @@ autodoc_mock_imports = [
     'torchmetrics',  # inherited from PTL
     'lightning_utilities',  # inherited from PTL
     'apex',
+    'megatron.core',
+    'transformer_engine',
     'joblib',  # inherited from optional code
     'IPython',
     'ipadic',
     'psutil',
+    'regex',
 ]
 
 _skipped_autodoc_mock_imports = ['wrapt', 'numpy']
@@ -112,6 +113,7 @@ extensions = [
     "sphinx.ext.autosectionlabel",
     "sphinxcontrib.bibtex",
     "sphinx_copybutton",
+    "sphinxext.opengraph",
 ]
 
 bibtex_bibfiles = [
@@ -254,3 +256,10 @@ def setup(app):
 # html_js_files = [
 #     './pk_scripts.js',
 # ]
+
+# OpenGraph settings
+ogp_site_url = 'https://nvidia.github.io/NeMo/'
+ogp_image = 'https://docs.nvidia.com/deeplearning/nemo/user-guide/docs/en/main/_static/nv_logo.png'
+
+# MathJax CDN
+mathjax_path = "https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/mml-chtml.min.js"

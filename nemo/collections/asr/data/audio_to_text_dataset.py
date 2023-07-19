@@ -26,7 +26,7 @@ from torch.utils.data import ChainDataset
 
 from nemo.collections.asr.data import audio_to_text, audio_to_text_dali
 from nemo.collections.asr.parts.preprocessing.perturb import process_augmentations
-from nemo.collections.common.data.dataset import ConcatDataset, CodeSwitchedDataset
+from nemo.collections.common.data.dataset import CodeSwitchedDataset, ConcatDataset
 from nemo.utils import logging
 
 
@@ -104,6 +104,7 @@ def get_concat_char_dataset(
     for manifest_filepath in manifest_filepaths:
         conf = copy.deepcopy(config)
         conf['manifest_filepath'] = manifest_filepath
+
         dataset = get_char_dataset(config=conf, augmentor=augmentor)
         datasets.append(dataset)
 
@@ -422,8 +423,6 @@ def get_tarred_dataset(
     """
     tarred_audio_filepaths = config['tarred_audio_filepaths']
     manifest_filepaths = config['manifest_filepath']
-    print('*** chk1 : ', tarred_audio_filepaths, flush=True)
-    print('*** chk2 : ', manifest_filepaths, flush=True)
     datasets = []
     tarred_audio_filepaths = convert_to_config_list(tarred_audio_filepaths)
     manifest_filepaths = convert_to_config_list(manifest_filepaths)
@@ -445,16 +444,15 @@ def get_tarred_dataset(
     if 'max_utts' in config:
         raise ValueError('"max_utts" parameter is not supported for tarred datasets')
 
-    print('*** chk3 : ', tarred_audio_filepaths, flush=True)
-    print('*** chk4 : ', manifest_filepaths, flush=True)
     for dataset_idx, (tarred_audio_filepath, manifest_filepath) in enumerate(
         zip(tarred_audio_filepaths, manifest_filepaths)
     ):
         if len(tarred_audio_filepath) == 1:
             tarred_audio_filepath = tarred_audio_filepath[0]
+        if len(manifest_filepath) == 1:
+            manifest_filepath = manifest_filepath[0]
+
         if tokenizer is None:
-            print('*** tar path: ', tarred_audio_filepath, flush=True)
-            print('*** manifest path: ', manifest_filepath, flush=True)
             dataset = audio_to_text.TarredAudioToCharDataset(
                 audio_tar_filepaths=tarred_audio_filepath,
                 manifest_filepath=manifest_filepath,
@@ -471,13 +469,12 @@ def get_tarred_dataset(
                 trim=config.get('trim_silence', False),
                 parser=config.get('parser', 'en'),
                 shard_strategy=config.get('tarred_shard_strategy', 'scatter'),
+                shard_manifests=config.get('shard_manifests', False),
                 global_rank=global_rank,
                 world_size=world_size,
                 return_sample_id=config.get('return_sample_id', False),
             )
         else:
-            print('*** tar path: ', tarred_audio_filepath, flush=True)
-            print('*** manifest path: ', manifest_filepath, flush=True)
             dataset = audio_to_text.TarredAudioToBPEDataset(
                 audio_tar_filepaths=tarred_audio_filepath,
                 manifest_filepath=manifest_filepath,
@@ -491,6 +488,7 @@ def get_tarred_dataset(
                 trim=config.get('trim_silence', False),
                 use_start_end_token=config.get('use_start_end_token', True),
                 shard_strategy=config.get('tarred_shard_strategy', 'scatter'),
+                shard_manifests=config.get('shard_manifests', False),
                 global_rank=global_rank,
                 world_size=world_size,
                 return_sample_id=config.get('return_sample_id', False),
@@ -511,27 +509,29 @@ def get_code_switched_dataset(
     tokenizer: Optional['TokenizerSpec'] = None,
     augmentor: Optional['AudioAugmentor'] = None,
 ) -> CodeSwitchedDataset:
-    
-    print('*** CS manifest_path: ', config['manifest_filepath'], flush=True)
-    print('*** CS tarred_paths: ', config.get('tarred_audio_filepaths', None), flush=True)
-    
-    tarred_audio_filepaths = config.get('tarred_audio_filepaths', None)
-    manifest_filepaths = config['manifest_filepath']
-    
+
+    if 'manifest_filepath' not in config:
+        raise ValueError("`manifest_filepath` must be provided in the dataset config if `is_code_switched=True`")
     if 'code_switched' not in config:
-        raise ValueError("`code_switched` key must be in the dataset config if `is_code_switched=True`")
+        raise ValueError("`code_switched` param group must be in the dataset config if `is_code_switched=True`")
+
+    manifest_filepaths = config['manifest_filepath']
+    tarred_audio_filepaths = config.get('tarred_audio_filepaths', None)
+
     cs_config = OmegaConf.to_container(config['code_switched'])
-    
+
+    # needed to support validation Datasets that arrive here as
+    # [[dataset1,dataset2]] otherwise ModelPT would interfere
     if len(manifest_filepaths) == 1 and not isinstance(manifest_filepaths[0], str):
         manifest_filepaths = config['manifest_filepath'][0]
     if tarred_audio_filepaths is None:
         tarred_audio_filepaths = [None] * len(manifest_filepaths)
-    
+
     if len(manifest_filepaths) != len(tarred_audio_filepaths):
         raise ValueError(
             f"manifest_filepaths (length={len(manifest_filepaths)}) and tarred_audio_filepaths (length={len(tarred_audio_filepaths)}) need to have the same number of items."
         )
-    
+
     datasets = []
     for dataset_idx, (tarred_audio_filepath, manifest_filepath) in enumerate(
         zip(tarred_audio_filepaths, manifest_filepaths)
@@ -557,9 +557,9 @@ def get_code_switched_dataset(
                 augmentor=None,
             )
         datasets.append(dataset)
-    
+
     config = OmegaConf.to_container(config)
-    
+
     dataset = CodeSwitchedDataset(
         datasets,
         shuffle=cs_config.get('shuffle', True),
@@ -581,7 +581,7 @@ def get_code_switched_dataset(
         sample_rate=config['sample_rate'],
         augmentor=augmentor,
     )
-    
+
     return dataset
 
 
@@ -710,16 +710,14 @@ def get_audio_to_text_char_dataset_from_config(
                 f"Concat dataset requires `concat_sampling_technique` but it was not provided. Config: {config}"
             )
             return None
-
-        if not 'concat_sampling_probabilities' in config:
-            logging.warning(
-                f"Concat dataset requires `concat_sampling_probabilities` list but it was not provided. Config: {config}"
-            )
-            return None
-        else:
-            if not isclose(sum(config['concat_sampling_probabilities']), 1, abs_tol=1e-6):
-                logging.warning(f"`concat_sampling_probabilities` need to sum to 1. Config: {config}")
+        if config['concat_sampling_technique'] == 'random':
+            if not 'concat_sampling_probabilities' in config:
+                logging.warning(f"Concat dataset requires `concat_sampling_probabilities` list. Config: {config}")
                 return None
+            else:
+                if not isclose(sum(config['concat_sampling_probabilities']), 1, abs_tol=1e-6):
+                    logging.warning(f"`concat_sampling_probabilities` need to sum to 1. Config: {config}")
+                    return None
 
     shuffle = config['shuffle']
     device = 'gpu' if torch.cuda.is_available() else 'cpu'
@@ -735,18 +733,24 @@ def get_audio_to_text_char_dataset_from_config(
         )
         return dataset
 
-    # Instantiate tarred dataset loader or normal dataset loader
+    # Instantiate a code-switched dataset if config is present
     if config.get('is_code_switched', False):
         if 'manifest_filepath' in config and config['manifest_filepath'] is None:
             logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
             return None
         if not ('code_switched' in config and config['code_switched'] is not None):
-            logging.warning(f"Code switched dataset requires `*_ds.code_switched.*` dict but it was not provided. Config: {config}")
+            logging.warning(
+                f"Code switched dataset requires `*_ds.code_switched.*` dict but it was not provided. Config: {config}"
+            )
             return None
-        if ('probs' in config['code_switched']) and (config['code_switched']['probs'] is not None) and (not isclose(sum(config['code_switched']['probs']), 1, abs_tol=1e-6)):
+        if (
+            ('probs' in config['code_switched'])
+            and (config['code_switched']['probs'] is not None)
+            and (not isclose(sum(config['code_switched']['probs']), 1, abs_tol=1e-6))
+        ):
             logging.warning(f"`.code_switched.probs` need to sum to 1. Config: {config['code_switched']}")
             return None
-        
+
         shuffle_n = config.get('shuffle_n', 4 * config['batch_size']) if shuffle else 0
         dataset = get_code_switched_dataset(
             config=config,
@@ -756,6 +760,7 @@ def get_audio_to_text_char_dataset_from_config(
             tokenizer=None,
             augmentor=augmentor,
         )
+    # Instantiate tarred dataset loader or normal dataset loader
     elif config.get('is_tarred', False):
         if ('tarred_audio_filepaths' in config and config['tarred_audio_filepaths'] is None) or (
             'manifest_filepath' in config and config['manifest_filepath'] is None
@@ -840,15 +845,14 @@ def get_audio_to_text_bpe_dataset_from_config(
             )
             return None
 
-        if not 'concat_sampling_probabilities' in config:
-            logging.warning(
-                f"Concat dataset requires `concat_sampling_probabilities` list but it was not provided. Config: {config}"
-            )
-            return None
-        else:
-            if not isclose(sum(config['concat_sampling_probabilities']), 1, abs_tol=1e-6):
-                logging.warning(f"`concat_sampling_probabilities` need to sum to 1. Config: {config}")
+        if config['concat_sampling_technique'] == 'random':
+            if not 'concat_sampling_probabilities' in config:
+                logging.warning(f"Concat dataset requires `concat_sampling_probabilities` list. Config: {config}")
                 return None
+            else:
+                if not isclose(sum(config['concat_sampling_probabilities']), 1, abs_tol=1e-6):
+                    logging.warning(f"`concat_sampling_probabilities` need to sum to 1. Config: {config}")
+                    return None
 
     shuffle = config['shuffle']
     device = 'gpu' if torch.cuda.is_available() else 'cpu'
@@ -865,18 +869,24 @@ def get_audio_to_text_bpe_dataset_from_config(
         )
         return dataset
 
-    # Instantiate tarred dataset loader or normal dataset loader
+    # Instantiate a code-switched dataset if config is present
     if config.get('is_code_switched', False):
         if 'manifest_filepath' in config and config['manifest_filepath'] is None:
             logging.warning(f"Could not load dataset as `manifest_filepath` was None. Provided config : {config}")
             return None
         if not ('code_switched' in config and config['code_switched'] is not None):
-            logging.warning(f"Code switched dataset requires `*_ds.code_switched.*` dict but it was not provided. Config: {config}")
+            logging.warning(
+                f"Code switched dataset requires `*_ds.code_switched.*` dict but it was not provided. Config: {config}"
+            )
             return None
-        if ('probs' in config['code_switched']) and (config['code_switched']['probs'] is not None) and (not isclose(sum(config['code_switched']['probs']), 1, abs_tol=1e-6)):
+        if (
+            ('probs' in config['code_switched'])
+            and (config['code_switched']['probs'] is not None)
+            and (not isclose(sum(config['code_switched']['probs']), 1, abs_tol=1e-6))
+        ):
             logging.warning(f"`.code_switched.probs` need to sum to 1. Config: {config['code_switched']}")
             return None
-        
+
         shuffle_n = config.get('shuffle_n', 4 * config['batch_size']) if shuffle else 0
         dataset = get_code_switched_dataset(
             config=config,
@@ -886,6 +896,7 @@ def get_audio_to_text_bpe_dataset_from_config(
             tokenizer=tokenizer,
             augmentor=augmentor,
         )
+    # Instantiate tarred dataset loader or normal dataset loader
     elif config.get('is_tarred', False):
         if ('tarred_audio_filepaths' in config and config['tarred_audio_filepaths'] is None) or (
             'manifest_filepath' in config and config['manifest_filepath'] is None
@@ -967,6 +978,7 @@ class ASRPredictionWriter(BasePredictionWriter):
             item = {}
             sample = self.dataset.get_manifest_sample(sample_id)
             item["audio_filepath"] = sample.audio_file
+            item["offset"] = sample.offset
             item["duration"] = sample.duration
             item["text"] = sample.text_raw
             item["pred_text"] = transcribed_text

@@ -54,6 +54,7 @@ from numba import jit, prange
 
 from nemo.collections.tts.torch.tts_data_types import DATA_STR2DATA_CLASS, MAIN_DATA_TYPES, WithLens
 from nemo.utils import logging
+from nemo.utils.decorators import deprecated
 
 HAVE_WANDB = True
 try:
@@ -158,14 +159,33 @@ def get_mask_from_lengths(lengths: Optional[torch.Tensor] = None, x: Optional[to
 def sort_tensor(
     context: torch.Tensor, lens: torch.Tensor, dim: Optional[int] = 0, descending: Optional[bool] = True
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Sorts elements in context by the dim lengths specified in lens
+    Args:
+        context:  source tensor, sorted by lens
+        lens: lengths of elements of context along the dimension dim
+        dim: Optional[int] : dimension to sort by
+    Returns:
+        context: tensor sorted by lens along dimension dim
+        lens_sorted: lens tensor, sorted
+        ids_sorted: reorder ids to be used to restore original order
+    
+    """
     lens_sorted, ids_sorted = torch.sort(lens, descending=descending)
     context = torch.index_select(context, dim, ids_sorted)
     return context, lens_sorted, ids_sorted
 
 
 def unsort_tensor(ordered: torch.Tensor, indices: torch.Tensor, dim: Optional[int] = 0) -> torch.Tensor:
-    unsort_ids = indices.gather(0, indices.argsort(0, descending=True))
-    return torch.index_select(ordered, dim, unsort_ids)
+    """Reverses the result of sort_tensor function:
+       o, _, ids = sort_tensor(x,l) 
+       assert unsort_tensor(o,ids) == x
+    Args:
+        ordered: context tensor, sorted by lengths
+        indices: torch.tensor: 1D tensor with 're-order' indices returned by sort_tensor
+    Returns:
+        ordered tensor in original order (before calling sort_tensor)  
+    """
+    return torch.index_select(ordered, dim, indices.argsort(0))
 
 
 @jit(nopython=True)
@@ -458,6 +478,23 @@ def plot_spectrogram_to_numpy(spectrogram):
     plt.xlabel("Frames")
     plt.ylabel("Channels")
     plt.tight_layout()
+
+    fig.canvas.draw()
+    data = save_figure_to_numpy(fig)
+    plt.close()
+    return data
+
+
+def create_plot(data, x_axis, y_axis, output_filepath=None):
+    fig, ax = plt.subplots(figsize=(12, 3))
+    im = ax.imshow(data, aspect="auto", origin="lower", interpolation="none")
+    plt.colorbar(im, ax=ax)
+    plt.xlabel(x_axis)
+    plt.ylabel(y_axis)
+    plt.tight_layout()
+
+    if output_filepath:
+        plt.savefig(output_filepath, format="png")
 
     fig.canvas.draw()
     data = save_figure_to_numpy(fig)
@@ -789,3 +826,14 @@ def sample_tts_input(
             0, export_config["num_speakers"], (max_batch,), device=device, dtype=torch.int64
         )
     return inputs
+
+
+@deprecated(
+    explanation="But it will not be removed until a further notice. G2P object root directory "
+    "`nemo_text_processing.g2p` has been replaced with `nemo.collections.tts.g2p`. "
+    "Please use the latter instead as of NeMo 1.18.0."
+)
+def g2p_backward_compatible_support(g2p_target: str) -> str:
+    # for backward compatibility
+    g2p_target_new = g2p_target.replace("nemo_text_processing.g2p", "nemo.collections.tts.g2p")
+    return g2p_target_new

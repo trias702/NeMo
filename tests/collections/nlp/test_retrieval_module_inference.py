@@ -22,6 +22,7 @@ from pytorch_lightning.trainer.trainer import Trainer
 from nemo.collections.nlp.modules.common.megatron.attention import ParallelChunkedCrossAttention
 from nemo.collections.nlp.modules.common.megatron.layer_type import LayerType
 from nemo.collections.nlp.modules.common.megatron.megatron_init import initialize_model_parallel_for_nemo
+from nemo.collections.nlp.modules.common.megatron.position_embedding import RotaryEmbedding
 from nemo.collections.nlp.modules.common.megatron.retrieval_token_level_encoder_decoder import (
     MegatronRetrievalTokenLevelEncoderDecoderModule,
 )
@@ -29,7 +30,6 @@ from nemo.collections.nlp.modules.common.megatron.retrieval_transformer import (
     MegatronRetrievalTransformerDecoderModule,
     MegatronRetrievalTransformerEncoderModule,
 )
-from nemo.collections.nlp.modules.common.megatron.rotary_pos_embedding import RotaryEmbedding
 from nemo.collections.nlp.modules.common.megatron.utils import (
     build_attention_mask_3d,
     init_method_normal,
@@ -44,9 +44,18 @@ try:
 except (ImportError, ModuleNotFoundError):
     HAVE_APEX = False
 
+try:
+    from megatron.core.enums import ModelType
+
+    HAVE_MEGATRON_CORE = True
+
+except (ImportError, ModuleNotFoundError):
+
+    HAVE_MEGATRON_CORE = False
+
 
 @pytest.mark.run_only_on('GPU')
-@pytest.mark.skipif(not HAVE_APEX, reason="apex is not installed")
+@pytest.mark.skipif(not HAVE_APEX or not HAVE_MEGATRON_CORE, reason="apex or megatron-core is not installed")
 class TestRetrievalModuleInference:
     @classmethod
     def setup_class(cls):

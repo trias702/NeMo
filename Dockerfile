@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:23.02-py3
+ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:23.06-py3
 
 # build an image that includes only the nemo dependencies, ensures that dependencies
 # are included first for optimal caching, and useful for building a development
@@ -26,6 +26,8 @@ FROM ${BASE_IMAGE} as nemo-deps
 ARG REQUIRE_TORCHAUDIO=false
 # k2: not required by default
 ARG REQUIRE_K2=false
+# ais cli: not required by default, install only if required
+ARG REQUIRE_AIS_CLI=false
 
 # Ensure apt-get won't prompt for selecting options
 ENV DEBIAN_FRONTEND=noninteractive
@@ -40,13 +42,14 @@ RUN apt-get update && \
   libavdevice-dev && \
   rm -rf /var/lib/apt/lists/*
 
-WORKDIR /tmp/
+WORKDIR /workspace/
 
-# TODO: Remove once this Apex commit (2/24/23) is included in PyTorch
+WORKDIR /tmp/
+# TODO: Remove once this Apex commit (5/12/23) is included in PyTorch
 # container
 RUN git clone https://github.com/NVIDIA/apex.git && \
   cd apex && \
-  git checkout 03c9d80ed54c0eaa5b581bf42ceca3162f085327 && \
+  git checkout 8b7a1ff183741dd8f9b87e7bafd04cfde99cea28 && \
   pip3 install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" --global-option="--fast_layer_norm" --global-option="--distributed_adam" --global-option="--deprecated_fused_adam" ./
 
 # uninstall stuff from base container
@@ -69,6 +72,11 @@ WORKDIR /tmp/nemo
 COPY requirements .
 RUN for f in $(ls requirements*.txt); do pip3 install --disable-pip-version-check --no-cache-dir -r $f; done
 
+# install flash attention dependencies
+RUN pip install flash-attn
+# pinned triton version for flash-attention https://github.com/HazyResearch/flash-attention/blob/main/flash_attn/flash_attn_triton.py#L3
+RUN pip install triton==2.0.0.dev20221202
+
 # install k2, skip if installation fails
 COPY scripts /tmp/nemo/scripts/
 RUN INSTALL_MSG=$(/bin/bash /tmp/nemo/scripts/speech_recognition/k2/setup.sh); INSTALL_CODE=$?; \
@@ -86,7 +94,7 @@ COPY . .
 
 # start building the final container
 FROM nemo-deps as nemo
-ARG NEMO_VERSION=1.16.0
+ARG NEMO_VERSION=1.20.0
 
 # Check that NEMO_VERSION is set. Build will fail without this. Expose NEMO and base container
 # version information as runtime environment variable for introspection purposes
@@ -102,13 +110,6 @@ RUN python -c "import nemo.collections.nlp as nemo_nlp" && \
   python -c "import nemo.collections.tts as nemo_tts" && \
   python -c "import nemo_text_processing.text_normalization as text_normalization"
 
-# TODO: Update to newer numba 0.56.0RC1 for 22.03 container if possible
-# install pinned numba version
-# RUN conda install -c conda-forge numba==0.54.1
-
-# Pinned to numba==0.53.1 to avoid bug in training with num_workers > 0
-# The bug still exists with PTL 1.8.4, this is just a temporary workaround.
-RUN pip install numba==0.53.1
 
 # copy scripts/examples/tests into container for end user
 WORKDIR /workspace/nemo
@@ -121,7 +122,12 @@ COPY tutorials /workspace/nemo/tutorials
 RUN printf "#!/bin/bash\njupyter lab --no-browser --allow-root --ip=0.0.0.0" >> start-jupyter.sh && \
   chmod +x start-jupyter.sh
 
-# Prepare AIS CLI
-ARG AIS_VERSION=v1.3.15
-ARG AIS_BIN=https://github.com/NVIDIA/aistore/releases/download/${AIS_VERSION}/ais-linux-amd64.tar.gz
-RUN curl -LO ${AIS_BIN} && tar -xzvf ais-linux-amd64.tar.gz && mv ./ais /usr/local/bin/. && rm ais-linux-amd64.tar.gz
+# If required, install AIS CLI
+RUN if [ "${REQUIRE_AIS_CLI}" = true ]; then \
+  INSTALL_MSG=$(/bin/bash scripts/installers/install_ais_cli_latest.sh); INSTALL_CODE=$?; \
+  echo ${INSTALL_MSG}; \
+  if [ ${INSTALL_CODE} -ne 0 ]; then \
+  echo "AIS CLI installation failed"; \
+  exit ${INSTALL_CODE}; \
+  else echo "AIS CLI installed successfully"; fi \
+  else echo "Skipping AIS CLI installation"; fi

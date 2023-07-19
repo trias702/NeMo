@@ -20,7 +20,7 @@ from nemo.collections.asr.parts.preprocessing.perturb import (
     GainPerturbation,
     ImpulsePerturbation,
     NoisePerturbation,
-    NoiseNormPerturbation,
+    NoisePerturbationWithNormalization,
     Perturbation,
     RirAndNoisePerturbation,
     ShiftPerturbation,
