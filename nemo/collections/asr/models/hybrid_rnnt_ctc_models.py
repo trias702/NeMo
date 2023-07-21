@@ -16,6 +16,7 @@ import copy
 import json
 import os
 import tempfile
+#from contextlib import ExitStack
 from typing import List, Optional
 
 import torch
@@ -31,7 +32,7 @@ from nemo.collections.asr.parts.mixins import ASRBPEMixin, InterCTCMixin
 from nemo.collections.asr.parts.utils.audio_utils import ChannelSelectorType
 from nemo.core.classes.common import PretrainedModelInfo
 from nemo.core.classes.mixins import AccessMixin
-from nemo.utils import logging, model_utils
+from nemo.utils import AppState, logging, model_utils
 
 
 class EncDecHybridRNNTCTCModel(EncDecRNNTModel, ASRBPEMixin, InterCTCMixin):
@@ -651,6 +652,141 @@ class EncDecHybridRNNTCTCModel(EncDecRNNTModel, ASRBPEMixin, InterCTCMixin):
             return ['encoder', 'decoder_joint']
         else:
             return ['self']
+    
+    def extract_model_ctc(self):
+        from nemo.collections.asr.models import EncDecCTCModel, EncDecCTCModelBPE
+        
+        app_state = AppState()
+        metadata = app_state.get_model_metadata_from_guid(self.model_guid)
+        
+        BPE = False
+        ctc_class = EncDecCTCModel
+        if 'tokenizer' in self.cfg.keys():
+            BPE = True
+            ctc_class = EncDecCTCModelBPE
+        
+        hybrid_model_cfg = OmegaConf.to_container(self.cfg)
+        
+        '''
+        new_cfg = {}
+        new_cfg['sample_rate'] = hybrid_model_cfg['sample_rate']
+        new_cfg['log_prediction'] = hybrid_model_cfg['log_prediction']
+        new_cfg['ctc_reduction'] = hybrid_model_cfg['aux_ctc']['ctc_reduction']
+        new_cfg['skip_nan_grad'] = hybrid_model_cfg['skip_nan_grad']
+        if BPE:
+            new_cfg['tokenizer'] = hybrid_model_cfg['tokenizer']
+        else:
+            new_cfg['labels'] = hybrid_model_cfg['labels']
+        new_cfg['preprocessor'] = hybrid_model_cfg['preprocessor']
+        new_cfg['spec_augment'] = hybrid_model_cfg['spec_augment']
+        new_cfg['encoder'] = hybrid_model_cfg['encoder']
+        new_cfg['decoder'] = hybrid_model_cfg['aux_ctc']['decoder']
+        new_cfg['interctc'] = hybrid_model_cfg['interctc']
+        new_cfg['optim'] = hybrid_model_cfg['optim']
+        new_cfg['train_ds'] = hybrid_model_cfg['train_ds']
+        new_cfg['validation_ds'] = hybrid_model_cfg['validation_ds']
+        '''
+        
+        new_cfg = hybrid_model_cfg.copy()
+        new_cfg['ctc_reduction'] = hybrid_model_cfg['aux_ctc']['ctc_reduction']
+        new_cfg['decoder'] = hybrid_model_cfg['aux_ctc']['decoder']
+        del new_cfg['compute_eval_loss']
+        del new_cfg['model_defaults']
+        del new_cfg['joint']
+        del new_cfg['decoding']
+        del new_cfg['aux_ctc']
+        del new_cfg['loss']
+        if BPE and 'labels' in new_cfg:
+            del new_cfg['labels']
+        elif (not BPE) and 'tokenizer' in new_cfg:
+            del new_cfg['tokenizer']
+        del new_cfg['target']
+        del new_cfg['nemo_version']
+        
+        new_cfg_oc = OmegaConf.create(new_cfg)
+        
+        '''
+        with ExitStack() if (metadata.restoration_path is not None and os.path.exists(metadata.restoration_path)) else tempfile.NamedTemporaryFile(suffix='.nemo', delete=False) as temp_nemo_file:
+            if metadata.restoration_path is not None:
+                ctc_model = ctc_class.restore_from(metadata.restoration_path, map_location=torch.device('cpu'), override_config_path=new_cfg_oc, strict=False)
+            else:
+                try:
+                    self.save_to(temp_nemo_file.name)
+                    ctc_model = ctc_class.restore_from(temp_nemo_file.name, map_location=torch.device('cpu'), override_config_path=new_cfg_oc, strict=False)
+                finally:
+                    temp_nemo_file.close()
+                    os.unlink(temp_nemo_file.name)
+        '''
+        if metadata.restoration_path is not None and os.path.exists(metadata.restoration_path):
+            ctc_model = ctc_class.restore_from(metadata.restoration_path, map_location=torch.device('cpu'), override_config_path=new_cfg_oc, strict=False)
+        else:
+            raise ValueError("Cannot extract a CTC model from hybrid until the hybrid has first been saved to disk. Call '.save_to()' on your hybrid model, then try CTC extraction again.")
+        
+        assert all([torch.allclose(self.state_dict()[x], ctc_model.state_dict()[x]) for x in self.state_dict().keys() if x.split('.')[0] in ['preprocessor', 'encoder']]), "Encoder and preprocessor state dicts don't match!"
+        
+        ctc_model.decoder.load_state_dict(self.ctc_decoder.state_dict())
+        
+        assert all([torch.allclose(self.ctc_decoder.state_dict()[x], ctc_model.decoder.state_dict()[x]) for x in self.ctc_decoder.state_dict().keys()]), "Decoder state_dict load failed!"
+        
+        assert isinstance(ctc_model, ctc_class), "Extracted CTC model is of the wrong type!"
+        
+        return ctc_model
+    
+    def extract_model_rnnt(self):
+        from nemo.collections.asr.models import EncDecRNNTModel, EncDecRNNTBPEModel
+        
+        app_state = AppState()
+        metadata = app_state.get_model_metadata_from_guid(self.model_guid)
+        
+        BPE = False
+        rnnt_class = EncDecRNNTModel
+        if 'tokenizer' in self.cfg.keys():
+            BPE = True
+            rnnt_class = EncDecRNNTBPEModel
+        
+        hybrid_model_cfg = OmegaConf.to_container(self.cfg)
+        
+        new_cfg = hybrid_model_cfg.copy()
+        del new_cfg['aux_ctc']
+        if BPE and 'labels' in new_cfg:
+            del new_cfg['labels']
+        elif (not BPE) and 'tokenizer' in new_cfg:
+            del new_cfg['tokenizer']
+        del new_cfg['target']
+        del new_cfg['nemo_version']
+        
+        new_cfg_oc = OmegaConf.create(new_cfg)
+        
+        '''
+        with ExitStack() if (metadata.restoration_path is not None and os.path.exists(metadata.restoration_path)) else tempfile.NamedTemporaryFile(suffix='.nemo', delete=False) as temp_nemo_file:
+            if metadata.restoration_path is not None:
+                rnnt_model = rnnt_class.restore_from(metadata.restoration_path, map_location=torch.device('cpu'), override_config_path=new_cfg_oc, strict=False)
+            else:
+                try:
+                    self.save_to(temp_nemo_file.name)
+                    rnnt_model = rnnt_class.restore_from(temp_nemo_file.name, map_location=torch.device('cpu'), override_config_path=new_cfg_oc, strict=False)
+                finally:
+                    temp_nemo_file.close()
+                    os.unlink(temp_nemo_file.name)
+        '''
+        if metadata.restoration_path is not None and os.path.exists(metadata.restoration_path):
+            rnnt_model = rnnt_class.restore_from(metadata.restoration_path, map_location=torch.device('cpu'), override_config_path=new_cfg_oc, strict=False)
+        else:
+            raise ValueError("Cannot extract an RNNT model from hybrid until the hybrid has first been saved to disk. Call '.save_to()' on your hybrid model, then try RNNT extraction again.")
+        
+        assert all([torch.allclose(self.state_dict()[x], rnnt_model.state_dict()[x]) for x in self.state_dict().keys() if x.split('.')[0] in ['preprocessor', 'encoder', 'decoder', 'joint']]), "State dict values mismatch, something went wrong!"
+        
+        assert isinstance(rnnt_model, rnnt_class), "Extracted RNNT model is of the wrong type!"
+        
+        return rnnt_model
+    
+    def extract_model(self, model_type: str='ctc'):
+        if model_type == 'ctc':
+            return self.extract_model_ctc()
+        elif model_type == 'rnnt':
+            return self.extract_model_rnnt()
+        else:
+            raise ValueError(f"extract_model must have argument model_type of either 'ctc' or 'rnnt', received unknown value: '{model_type}'")
 
     @property
     def output_module(self):

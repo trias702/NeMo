@@ -14,14 +14,14 @@
 
 
 """
-A script to convert a Nemo ASR Hybrid model file (.nemo) to a Nemo ASR CTC model file (.nemo)
+A script to convert a Nemo ASR Hybrid model file (.nemo) to a Nemo ASR CTC or RNNT model file (.nemo)
 
-This allows you to train a RNNT-CTC Hybrid model, but then convert to a pure CTC model for use
+This allows you to train a RNNT-CTC Hybrid model, but then convert to a pure CTC or pure RNNT model for use
 in Riva. Works just fine with nemo2riva, HOWEVER, Riva doesn't support AggTokenizer, but nemo2riva
 does, so be careful that you do not convert a model with AggTokenizer and then use that in Riva
 as it will not work.
 
-Usage: python convert_nemo_asr_hybrid_to_ctc.py -i /path/to/hybrid.nemo -o /path/to/saved_ctc_model.nemo
+Usage: python convert_nemo_asr_hybrid_to_ctc.py -i /path/to/hybrid.nemo -o /path/to/saved_ctc_model.nemo -m [ctc|rnnt]
 
 """
 
@@ -29,11 +29,78 @@ Usage: python convert_nemo_asr_hybrid_to_ctc.py -i /path/to/hybrid.nemo -o /path
 import argparse
 import os
 import torch
-from nemo.collections.asr.models import ASRModel, EncDecCTCModel, EncDecCTCModelBPE
+from nemo.collections.asr.models import ASRModel, EncDecCTCModel, EncDecCTCModelBPE, EncDecRNNTModel, EncDecRNNTBPEModel
 
 from omegaconf import OmegaConf
 
 from nemo.utils import logging
+
+
+def extract_model_ctc(args, hybrid_model):
+    BPE = False
+    ctc_class = EncDecCTCModel
+    if 'tokenizer' in hybrid_model.cfg.keys():
+        BPE = True
+        ctc_class = EncDecCTCModelBPE
+    
+    hybrid_model_cfg = OmegaConf.to_container(hybrid_model.cfg)
+    
+    new_cfg = hybrid_model_cfg.copy()
+    new_cfg['ctc_reduction'] = hybrid_model_cfg['aux_ctc']['ctc_reduction']
+    new_cfg['decoder'] = hybrid_model_cfg['aux_ctc']['decoder']
+    del new_cfg['compute_eval_loss']
+    del new_cfg['model_defaults']
+    del new_cfg['joint']
+    del new_cfg['decoding']
+    del new_cfg['aux_ctc']
+    del new_cfg['loss']
+    if BPE and 'labels' in new_cfg:
+        del new_cfg['labels']
+    elif (not BPE) and 'tokenizer' in new_cfg:
+        del new_cfg['tokenizer']
+    del new_cfg['target']
+    del new_cfg['nemo_version']
+    
+    new_cfg_oc = OmegaConf.create(new_cfg)
+    ctc_model = ctc_class.restore_from(args.input, map_location=torch.device('cpu'), override_config_path=new_cfg_oc, strict=False)
+    
+    assert all([torch.allclose(hybrid_model.state_dict()[x], ctc_model.state_dict()[x]) for x in hybrid_model.state_dict().keys() if x.split('.')[0] in ['preprocessor', 'encoder']]), "Encoder and preprocessor state dicts don't match!"
+    
+    ctc_model.decoder.load_state_dict(hybrid_model.ctc_decoder.state_dict())
+    
+    assert all([torch.allclose(hybrid_model.ctc_decoder.state_dict()[x], ctc_model.decoder.state_dict()[x]) for x in hybrid_model.ctc_decoder.state_dict().keys()]), "Decoder state_dict load failed!"
+    
+    assert isinstance(ctc_model, ctc_class), "Extracted CTC model is of the wrong expected class!"
+    
+    return ctc_model
+
+
+def extract_model_rnnt(args, hybrid_model):
+    BPE = False
+    rnnt_class = EncDecRNNTModel
+    if 'tokenizer' in hybrid_model.cfg.keys():
+        BPE = True
+        rnnt_class = EncDecRNNTBPEModel
+    
+    hybrid_model_cfg = OmegaConf.to_container(hybrid_model.cfg)
+    
+    new_cfg = hybrid_model_cfg.copy()
+    del new_cfg['aux_ctc']
+    if BPE and 'labels' in new_cfg:
+        del new_cfg['labels']
+    elif (not BPE) and 'tokenizer' in new_cfg:
+        del new_cfg['tokenizer']
+    del new_cfg['target']
+    del new_cfg['nemo_version']
+    
+    new_cfg_oc = OmegaConf.create(new_cfg)
+    rnnt_model = rnnt_class.restore_from(args.input, map_location=torch.device('cpu'), override_config_path=new_cfg_oc, strict=False)
+    
+    assert all([torch.allclose(hybrid_model.state_dict()[x], rnnt_model.state_dict()[x]) for x in hybrid_model.state_dict().keys() if x.split('.')[0] in ['preprocessor', 'encoder', 'decoder', 'joint']]), "State dict values mismatch, something went wrong!"
+    
+    assert isinstance(rnnt_model, rnnt_class), "Extracted RNNT model is of the wrong expected class!"
+    
+    return rnnt_model
 
 
 if __name__ == '__main__':
@@ -43,6 +110,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '-o', '--output', required=True, type=str, help='path and name of output .nemo file'
+    )
+    parser.add_argument(
+        '-m', '--model', required=False, type=str, default='ctc', choices=['ctc','rnnt'], help='whether to output a ctc or rnnt model from the hybrid'
     )
     parser.add_argument('--cuda', action='store_true', help='put Nemo model onto GPU prior to savedown')
 
@@ -54,42 +124,16 @@ if __name__ == '__main__':
     
     hybrid_model = ASRModel.restore_from(args.input, map_location=torch.device('cpu'))
     
-    BPE = False
-    ctc_class = EncDecCTCModel
-    if 'tokenizer' in hybrid_model.cfg.keys():
-        BPE = True
-        ctc_class = EncDecCTCModelBPE
-    
-    hybrid_model_cfg = OmegaConf.to_container(hybrid_model.cfg)
-    
-    new_cfg = {}
-    new_cfg['sample_rate'] = hybrid_model_cfg['sample_rate']
-    new_cfg['log_prediction'] = hybrid_model_cfg['log_prediction']
-    new_cfg['ctc_reduction'] = hybrid_model_cfg['aux_ctc']['ctc_reduction']
-    new_cfg['skip_nan_grad'] = hybrid_model_cfg['skip_nan_grad']
-    if BPE:
-        new_cfg['tokenizer'] = hybrid_model_cfg['tokenizer']
-    new_cfg['preprocessor'] = hybrid_model_cfg['preprocessor']
-    new_cfg['spec_augment'] = hybrid_model_cfg['spec_augment']
-    new_cfg['encoder'] = hybrid_model_cfg['encoder']
-    new_cfg['decoder'] = hybrid_model_cfg['aux_ctc']['decoder']
-    new_cfg['interctc'] = hybrid_model_cfg['interctc']
-    new_cfg['optim'] = hybrid_model_cfg['optim']
-    new_cfg['train_ds'] = hybrid_model_cfg['train_ds']
-    new_cfg['validation_ds'] = hybrid_model_cfg['validation_ds']
-    
-    new_cfg_oc = OmegaConf.create(new_cfg)
-    
-    ctc_model = ctc_class.restore_from(args.input, map_location=torch.device('cpu'), override_config_path=new_cfg_oc, strict=False)
-    
-    assert all([torch.allclose(hybrid_model.state_dict()[x], ctc_model.state_dict()[x]) for x in hybrid_model.state_dict().keys() if x.split('.')[0] in ['preprocessor', 'encoder']]), "Encoder and preprocessor state dicts don't match!"
-    
-    ctc_model.decoder.load_state_dict(hybrid_model.ctc_decoder.state_dict())
-    
-    assert all([torch.allclose(hybrid_model.ctc_decoder.state_dict()[x], ctc_model.decoder.state_dict()[x]) for x in hybrid_model.ctc_decoder.state_dict().keys()]), "Decoder state_dict load failed!"
+    if args.model == 'ctc':
+        output_model = extract_model_ctc(args, hybrid_model)
+    elif args.model == 'rnnt':
+        output_model = extract_model_rnnt(args, hybrid_model)
+    else:
+        logging.critical(f"the model arg must be one of 'ctc' or 'rnnt', received unknown value: '{args.model}'. Aborting.")
+        exit(255)
     
     if args.cuda and torch.cuda.is_available():
-        ctc_model = ctc_model.cuda()
-    
-    ctc_model.save_to(args.output)
-    logging.info(f'Converted CTC model was successfully saved to {args.output}')
+        output_model = output_model.cuda()
+
+    output_model.save_to(args.output)
+    logging.info(f'Converted {args.model.upper()} model was successfully saved to {args.output}')
