@@ -77,7 +77,12 @@ def item_iter(
         with open(expanduser(cached_manifest_file), 'r', encoding='utf_8') as f:
             for line in f:
                 k += 1
-                item = parse_func(line, manifest_file)
+                try:
+                    item = parse_func(line, manifest_file)
+                except:
+                    print(f"*** BAD JSON file [ {manifest_file} ] : {line}", flush=True)
+                    k -= 1
+                    continue
                 item['id'] = k
 
                 yield item

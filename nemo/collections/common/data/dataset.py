@@ -488,6 +488,9 @@ class CodeSwitchedDataset(IterableDataset):
             sample_duration = len(audio) / self.sample_rate
             if (created_sample_duration_sec + sample_duration) > self.max_duration:
                 continue
+            
+            if len(comp_text) + len(labels) >= 1024:
+                continue
 
             if comp_text.device != labels.device:
                 comp_text = comp_text.to(labels.device)
