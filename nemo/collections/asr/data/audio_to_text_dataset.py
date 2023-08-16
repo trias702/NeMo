@@ -580,6 +580,7 @@ def get_code_switched_dataset(
         infinity_mode=cs_config.get('infinity_mode', False),
         sample_rate=config['sample_rate'],
         augmentor=augmentor,
+        schedule=cs_config.get('schedule', None),
     )
 
     return dataset
