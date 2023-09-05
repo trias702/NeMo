@@ -98,11 +98,9 @@ if __name__ == '__main__':
 
     override_model_dict = {
         'micro_batch_size': 1,
-        'global_batch_size': 4,
-        'rampup_batch_size': None,
+        'global_batch_size': 1,
         'tensor_model_parallel_size': 1,
         'pipeline_model_parallel_size': 1,
-        'virtual_pipeline_model_parallel_size': None,
         'megatron_amp_O2': True,
         'transformer_engine': False,
         'use_cpu_initialization': False,
@@ -116,21 +114,19 @@ if __name__ == '__main__':
         'layernorm_epsilon': 1e-5,
         'pre_process': True,
         'post_process': True,
-        'num_tokentypes': 0,
         'apply_query_key_layer_scaling': False,
-        'parallel_output': False,
         'bias': False,
         'bias_dropout_add_fusion': False,
         'bias_activation_fusion': False,
         'transformer_block_type': 'pre_ln',
         'normalization': 'low_precision_layernorm',
-        'fp32_residual_connection': False,
-        'hidden_dropout': 0,
-        'attention_dropout': 0,
-        'ffn_dropout': 0,
+        #'fp32_residual_connection': False,
+        'hidden_dropout': 0.0,
+        'attention_dropout': 0.0,
+        'ffn_dropout': 0.0,
         'megatron_legacy': True,
         'share_embeddings_and_output_weights': True,
-        'sequence_parallel': False,
+        #'sequence_parallel': False,
         'position_embedding_type': 'alibi',
         'normalize_attention_scores': True,
         'use_flash_attention': False,
@@ -165,6 +161,9 @@ if __name__ == '__main__':
     model_dict['tokenizer'] = tokeniser_dict
 
     omega_cfg = OmegaConf.create(model_dict)
+
+    app_state = AppState()
+    app_state.data_parallel_rank = 0
 
     trainer = pl.Trainer(**trainer_dict)
 
