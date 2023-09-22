@@ -1662,6 +1662,14 @@ class ModelPT(LightningModule, Model):
         if hasattr(self, '_freeze_cfg') and self._freeze_cfg is not None:
             if self.training and hasattr(self, "trainer") and self.trainer is not None:
                 num_updates = self.trainer.global_step + 1
+                obj_to_set = None
+                # bit of a hack to ensure compatibility with MegatronGPT modules and FP16Module wrapper
+                if hasattr(self, 'model') and hasattr(self.model, 'module'):
+                    obj_to_set = self.model.module
+                elif hasattr(self, 'model'):
+                    obj_to_set = self.model
+                else:
+                    obj_to_set = self
 
                 for ml, m_steps in self._freeze_cfg['modules'].items():
                     # we could do hasattr check here, but it's too expensive for each step
@@ -1673,11 +1681,20 @@ class ModelPT(LightningModule, Model):
                     else:
                         should_freeze = num_updates <= m_steps or m_steps == -1
                     if should_freeze and not self._freeze_cfg['is_frozen'][ml]:
-                        getattr(self, ml).freeze()
-                        getattr(self, ml).train()
+                        if hasattr(getattr(obj_to_set, ml), 'freeze'):
+                            getattr(obj_to_set, ml).freeze()
+                        else:
+                            for param in getattr(obj_to_set, ml).parameters():
+                                param.requires_grad = False
+                        getattr(obj_to_set, ml).train()
                         self._freeze_cfg['is_frozen'][ml] = True
                     elif not should_freeze and self._freeze_cfg['is_frozen'][ml]:
-                        getattr(self, ml).unfreeze()
+                        if hasattr(getattr(obj_to_set, ml), 'unfreeze'):
+                            getattr(obj_to_set, ml).unfreeze()
+                        else:
+                            for param in getattr(obj_to_set, ml).parameters():
+                                param.requires_grad = True
+                            getattr(obj_to_set, ml).train()
                         self._freeze_cfg['is_frozen'][ml] = False
 
     def on_train_batch_end(self, outputs, batch: Any, batch_idx: int, unused: int = 0) -> None:
